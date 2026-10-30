@@ -49,4 +49,4 @@ node scripts/check-data.mjs
 
 ## Publishing (one-time setup)
 
-In the repository on GitHub, go to **Settings → Pages** and set **Source** to **GitHub Actions**. Every push to the default branch then publishes the site.
+In the repository on GitHub, go to **Settings → Pages** and set **Source** to **GitHub Actions**. Every push to `main` then publishes the site.

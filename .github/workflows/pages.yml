@@ -25,8 +25,8 @@ jobs:
         run: node scripts/check-data.mjs
 
   deploy:
-    # Only the default branch is published; other branches just get the data check.
-    if: github.ref_name == github.event.repository.default_branch
+    # Only main is published; other branches just get the data check.
+    if: github.ref_name == 'main'
     needs: check
     runs-on: ubuntu-latest
     environment:
