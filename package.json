@@ -1,0 +1,1 @@
+{"type":"module","private":true,"scripts":{"check":"node scripts/check-data.mjs"}}

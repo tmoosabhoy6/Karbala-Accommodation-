@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f6f3">
+  <title>Karbala Rooms</title>
+  <meta name="description" content="Room capacity by building, floor and feature.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 23V12l7-4 7 4v11h-5v-6h-4v6z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <h1>Karbala Rooms</h1>
+      <p class="sub">Room capacity by building, floor and feature</p>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="filters" aria-label="Filters">
+      <div class="search">
+        <label for="q" class="visually-hidden">Find a room number</label>
+        <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="9" cy="9" r="6"/><path d="m14 14 4 4"/></svg>
+        <input id="q" type="search" placeholder="Find a room number" autocomplete="off" inputmode="search">
+      </div>
+
+      <fieldset>
+        <legend>Building</legend>
+        <div class="chips" id="f-building"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Floor</legend>
+        <div class="chips" id="f-floor"></div>
+      </fieldset>
+
+      <button type="button" class="more-toggle" id="more-toggle" aria-expanded="false" aria-controls="more-filters">
+        More filters<span class="more-count" id="more-count"></span>
+      </button>
+
+      <div class="more" id="more-filters">
+        <fieldset id="wing-set">
+          <legend>Wing</legend>
+          <div class="chips" id="f-wing"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Features <span class="legend-hint">rooms must have all selected</span></legend>
+          <div class="chips" id="f-feature"></div>
+        </fieldset>
+
+        <fieldset>
+          <legend id="pax-label">Fits at least</legend>
+          <div class="stepper" role="group" aria-labelledby="pax-label">
+            <button type="button" id="pax-down" aria-label="Fewer people">−</button>
+            <output id="pax-value" aria-live="polite">Any</output>
+            <button type="button" id="pax-up" aria-label="More people">+</button>
+          </div>
+        </fieldset>
+
+        <label class="switch">
+          <input type="checkbox" id="f-nonguest">
+          <span class="track" aria-hidden="true"></span>
+          <span>Include staff and non-guest rooms</span>
+        </label>
+      </div>
+
+      <button type="button" class="clear" id="clear" hidden>Clear all filters</button>
+    </aside>
+
+    <main id="main">
+      <section class="summary" aria-live="polite" id="summary">
+        <div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="breakdown-title">
+        <div class="panel-head">
+          <h2 id="breakdown-title">Capacity</h2>
+          <div class="segmented" role="tablist" aria-label="Group capacity by">
+            <button type="button" role="tab" id="tab-floor" aria-selected="true">By floor</button>
+            <button type="button" role="tab" id="tab-feature" aria-selected="false">By feature</button>
+          </div>
+        </div>
+        <div id="breakdown"><div class="skeleton block"></div></div>
+      </section>
+
+      <section aria-labelledby="rooms-title">
+        <h2 id="rooms-title" class="section-title">Rooms</h2>
+        <div id="rooms"><div class="skeleton block tall"></div></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
