@@ -333,3 +333,28 @@ dialog form { display: flex; flex-direction: column; }
 .toast[hidden] { display: none; }
 .toast button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #7fe0d2; font-weight: 700; cursor: pointer; }
 .toast button[hidden] { display: none; }
+
+/* ---- Blocked rooms ---- */
+
+:root { --blocked: #c62828; --blocked-soft: #fdecec; }
+@media (prefers-color-scheme: dark) { :root { --blocked: #ff6b6b; --blocked-soft: #3a1c1c; } }
+
+.blocked-x {
+  flex: none; margin-left: auto; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--blocked); display: inline-flex; align-items: center; justify-content: center;
+}
+.blocked-x svg { width: 16px; height: 16px; fill: none; stroke: #fff; stroke-width: 3; stroke-linecap: round; }
+.tile-top .edited + .blocked-x { margin-left: 0; }
+.tile-top .edited { margin-left: auto; }
+
+.tile-blocked { background: var(--blocked-soft); border-color: var(--blocked); }
+.tile-blocked .tile-cap, .tile-blocked .tile-extra, .tile-blocked .tile-tags { opacity: 0.55; }
+.tile-blocked .tile-cap { text-decoration: line-through; }
+.tile-blocked-label { font-size: 13px; font-weight: 700; color: var(--blocked); text-transform: uppercase; letter-spacing: 0.04em; }
+.blocked-count { color: var(--blocked); font-weight: 600; }
+
+.block-switch { align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; }
+.block-switch[hidden] { display: none; }
+.block-switch .field-help { display: block; font-weight: 400; margin-top: 2px; }
+.block-switch input:checked + .track { background: var(--blocked); }
+.block-switch:has(input:checked) { border-color: var(--blocked); background: var(--blocked-soft); }

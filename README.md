@@ -5,7 +5,7 @@ A simple dashboard of the guest-house rooms, with two tabs:
 - **Guest rooms**: filter by building, floor, number of beds, wing, features and how many people a room fits. It shows the total rooms, beds and capacity for whatever is selected, grouped by floor, by number of beds, or by feature.
 - **KG & staff**: the Khidmat Guzar and staff rooms and who is staying in each. You can search by room or by name.
 
-Tap any room to change its extra mattresses or notes; on KG rooms you can also change the name and the number of people. **These changes are saved only on the device where they were made**, marked "Edited" on the room, and can be undone or reset to the original. To make a change permanent for everyone, edit the files below.
+Tap a guest room to **block** it (it shows a red ✕ and is left out of all guest totals and counts) or to change its extra mattresses or notes; on KG rooms you can also change the name and the number of people. **These changes are saved only on the device where they were made**, marked "Edited" on the room, and can be undone or reset to the original. To make a change permanent for everyone, edit the files below.
 
 There is no sign-in and no database. The whole room list lives in two files in this repository:
 
@@ -34,6 +34,7 @@ The data is checked before the site is published. If a row is broken, for exampl
 | `features` | Filter tags separated by `;`, e.g. `Partition;Ladies`. Any new word you add becomes a new filter chip. |
 | `beds`, `extra_mattress`, `extra_2` | Whole numbers. "Fits up to" is always worked out as beds + extra_mattress + extra_2. |
 | `kg` | `yes` puts the room in the **KG & staff** tab and leaves it out of the guest totals. `no` is a guest room. |
+| `blocked` | Optional. `yes` blocks a guest room for everyone (red ✕, left out of the totals). Empty or `no` = not blocked. |
 | `occupant` | KG rooms: who is staying there. Empty means no one is listed. |
 | `people` | KG rooms: how many people are staying, if known. |
 | `notes` | Free text shown on the room tile. |

@@ -123,6 +123,7 @@ export function buildModel(buildingsCsv, roomsCsv) {
       extra: extraMattress + extra2,
       maxPax: beds + extraMattress + extra2,
       kg: yes(r.kg),
+      blocked: yes(r.blocked),
       occupant: r.occupant,
       people,
       notes: r.notes,
@@ -134,14 +135,19 @@ export function buildModel(buildingsCsv, roomsCsv) {
   return { buildings, rooms, errors };
 }
 
+// Totals count only rooms that can be used: blocked rooms add nothing.
 export function totals(rooms) {
   let beds = 0, extra = 0, maxPax = 0;
-  for (const r of rooms) { beds += r.beds; extra += r.extra; maxPax += r.maxPax; }
-  return { rooms: rooms.length, beds, extra, maxPax };
+  let count = 0;
+  for (const r of rooms) {
+    if (r.blocked) continue;
+    count += 1; beds += r.beds; extra += r.extra; maxPax += r.maxPax;
+  }
+  return { rooms: count, beds, extra, maxPax };
 }
 
 // Replaces a room's editable fields with the values saved on this device.
-// edit: { extra?, occupant?, people?, notes? }
+// edit: { extra?, occupant?, people?, notes?, blocked? }
 export function withEdit(room, edit) {
   if (!edit) return room;
   const r = { ...room, edited: true, original: room };
@@ -149,6 +155,7 @@ export function withEdit(room, edit) {
   if (edit.occupant != null) r.occupant = edit.occupant;
   if (edit.people != null) r.people = edit.people;
   if (edit.notes != null) r.notes = edit.notes;
+  if (edit.blocked != null) r.blocked = edit.blocked;
   return r;
 }
 

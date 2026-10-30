@@ -120,7 +120,7 @@ function renderFilters() {
     const withoutBeds = applyFilters(all, activeFilters({ beds: new Set() }));
     const bedCounts = new Map();
     for (const r of inBuildings) bedCounts.set(String(r.beds), 0);
-    for (const r of withoutBeds) bedCounts.set(String(r.beds), bedCounts.get(String(r.beds)) + 1);
+    for (const r of withoutBeds) if (!r.blocked) bedCounts.set(String(r.beds), bedCounts.get(String(r.beds)) + 1);
     const beds = [...bedCounts.keys()].sort((a, b) => a - b);
     renderChipGroup($('f-beds'), 'beds', beds.map((b) => ({ value: b, label: b, count: bedCounts.get(b) })));
 
@@ -134,7 +134,7 @@ function renderFilters() {
     for (const r of inBuildings) for (const f of r.features) counts.set(f, 0);
     for (const f of state.features) counts.set(f, 0);
     for (const r of withoutFeatures) {
-      if ([...state.features].every((f) => r.features.includes(f))) {
+      if (!r.blocked && [...state.features].every((f) => r.features.includes(f))) {
         for (const f of r.features) counts.set(f, counts.get(f) + 1);
       }
     }
@@ -172,10 +172,13 @@ function renderSummary(list) {
   }
   const t = totals(list);
   const all = totals(pool());
-  const isFiltered = t.rooms !== all.rooms;
+  const isFiltered = list.length !== pool().length;
   const of = (total) => (isFiltered ? `of ${fmt(total)}` : '');
+  const blocked = list.filter((r) => r.blocked).length;
+  const roomsSub = [of(all.rooms), blocked ? `<span class="blocked-count">${fmt(blocked)} blocked</span>` : '']
+    .filter(Boolean).join(' · ');
   el.className = 'summary';
-  el.innerHTML = stat('Rooms', t.rooms, of(all.rooms))
+  el.innerHTML = stat('Rooms', t.rooms, roomsSub)
     + stat('Beds', t.beds, of(all.beds))
     + stat('Extra mattresses', t.extra, of(all.extra))
     + stat('Fits up to', t.maxPax, isFiltered ? `of ${fmt(all.maxPax)} people` : 'people', true);
@@ -204,7 +207,7 @@ const HEAD = `
 
 function groupBy(list, keyOf) {
   const map = new Map();
-  for (const r of list) for (const k of keyOf(r)) {
+  for (const r of list) if (!r.blocked) for (const k of keyOf(r)) {
     if (!map.has(k)) map.set(k, []);
     map.get(k).push(r);
   }
@@ -215,7 +218,7 @@ function renderBreakdown(list) {
   const el = $('breakdown');
   for (const b of document.querySelectorAll('[data-by]')) b.setAttribute('aria-selected', b.dataset.by === state.by);
 
-  if (list.length === 0) {
+  if (!list.some((r) => !r.blocked)) {
     el.innerHTML = '<p class="empty-small">Nothing to count with these filters.</p>';
     return;
   }
@@ -223,14 +226,14 @@ function renderBreakdown(list) {
   if (state.by === 'floor') {
     const groups = groupByBuildingFloor(list);
     const max = Math.max(...groups.flatMap((g) => g.floors.map((f) => totals(f.rooms).maxPax)));
-    el.innerHTML = groups.map((g) => {
+    el.innerHTML = groups.filter((g) => totals(g.rooms).rooms).map((g) => {
       const bt = totals(g.rooms);
       return `
         <div class="bgroup">
           <h3 class="bgroup-title">${esc(buildingName.get(g.code))}
             <span class="bgroup-total">${fmt(bt.rooms)} rooms · ${fmt(bt.beds)} beds · up to ${fmt(bt.maxPax)}</span></h3>
           ${HEAD}
-          ${g.floors.map((f) => row({
+          ${g.floors.filter((f) => totals(f.rooms).rooms).map((f) => row({
             label: floorLabel(f.floor),
             t: totals(f.rooms),
             max,
@@ -294,12 +297,14 @@ function groupByBuildingFloor(list) {
 // ---- Room tiles -----------------------------------------------------------------
 
 const EDITED = '<span class="edited" title="Changed on this device">Edited</span>';
+const BLOCKED_X = '<span class="blocked-x" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></span>';
 
 function guestTile(r) {
   const tags = [...r.features];
   if (r.wing === 'New wing') tags.unshift('New wing');
   return `
-    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}</div>
+    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}${r.blocked ? BLOCKED_X : ''}</div>
+    ${r.blocked ? '<div class="tile-blocked-label">Blocked</div>' : ''}
     <div class="tile-cap">${plural(r.beds, 'bed', 'beds')} · up to <strong>${r.maxPax}</strong></div>
     ${r.extra ? `<div class="tile-extra">+${plural(r.extra, 'extra mattress', 'extra mattresses')}</div>` : ''}
     ${tags.length ? `<div class="tile-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
@@ -334,7 +339,7 @@ function renderRooms(list) {
     const t = totals(f.rooms);
     const total = isKg()
       ? `${plural(t.rooms, 'room', 'rooms')} · ${fmt(f.rooms.filter(isOccupied).length)} with someone`
-      : `${plural(t.rooms, 'room', 'rooms')} · up to ${fmt(t.maxPax)}`;
+      : `${plural(t.rooms, 'room', 'rooms')} · up to ${fmt(t.maxPax)}${f.rooms.length > t.rooms ? ` · ${fmt(f.rooms.length - t.rooms)} blocked` : ''}`;
     return `
       <div class="floor">
         <h3 class="floor-title">
@@ -342,7 +347,7 @@ function renderRooms(list) {
           <span class="floor-total">${total}</span>
         </h3>
         <ul class="grid">${f.rooms.map((r) => `
-          <li><button type="button" class="tile${r.kg && !isOccupied(r) ? ' tile-off' : ''}" data-room="${esc(r.id)}">
+          <li><button type="button" class="tile${r.kg && !isOccupied(r) ? ' tile-off' : ''}${r.blocked && !r.kg ? ' tile-blocked' : ''}" data-room="${esc(r.id)}"${r.blocked && !r.kg ? ` aria-label="${esc(r.room)}, blocked"` : ''}>
             ${r.kg ? kgTile(r) : guestTile(r)}
           </button></li>`).join('')}</ul>
       </div>`;
@@ -360,7 +365,7 @@ function openRoom(id) {
   if (!room) return;
   editing = {
     room,
-    draft: { extra: room.extra, occupant: room.occupant, people: room.people, notes: room.notes },
+    draft: { extra: room.extra, occupant: room.occupant, people: room.people, notes: room.notes, blocked: room.blocked },
   };
   const base = room.original || room;
   $('rd-where').textContent = `${buildingName.get(room.building)} · ${floorLabel(room.floor)}${room.wing ? ` · ${room.wing}` : ''}`;
@@ -370,10 +375,12 @@ function openRoom(id) {
   if (!room.kg || room.beds) facts.push(['Beds', fmt(room.beds)]);
   if (room.features.length) facts.push(['Features', room.features.join(', ')]);
   if (room.roomType) facts.push(['Listed as', room.roomType]);
-  if (room.edited) facts.push(['Original', `${plural(base.extra, 'extra mattress', 'extra mattresses')}${base.occupant ? ` · ${base.occupant}` : ''}`]);
+  if (room.edited) facts.push(['Original', `${plural(base.extra, 'extra mattress', 'extra mattresses')}${base.occupant ? ` · ${base.occupant}` : ''}${base.blocked ? ' · blocked' : ''}`]);
   $('rd-facts').innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
 
   for (const el of document.querySelectorAll('.kg-field')) el.hidden = !room.kg;
+  $('rd-block-field').hidden = room.kg;
+  $('rd-blocked').checked = room.blocked;
   $('rd-occupant').value = room.occupant;
   $('rd-notes').value = room.notes;
   $('rd-reset').hidden = !room.edited;
@@ -418,17 +425,23 @@ function finishEdit(action) {
   if (action !== 'save') return;
 
   draft.occupant = $('rd-occupant').value.trim();
+  draft.blocked = room.kg ? room.blocked : $('rd-blocked').checked;
   draft.notes = $('rd-notes').value.trim();
   // Only keep the fields that differ from the room list.
   const base = room.original || room;
   const next = {};
-  for (const k of ['extra', 'occupant', 'people', 'notes']) {
+  const FIELDS = ['extra', 'occupant', 'people', 'notes', 'blocked'];
+  for (const k of FIELDS) {
     if (draft[k] !== base[k]) next[k] = draft[k];
   }
-  const changed = ['extra', 'occupant', 'people', 'notes'].some((k) => draft[k] !== room[k]);
-  if (!changed) return;
+  const changed = FIELDS.filter((k) => draft[k] !== room[k]);
+  if (changed.length === 0) return;
   next.at = new Date().toISOString();
-  saveEdit(room, Object.keys(next).length > 1 ? next : null, `Saved ${roomTitle(room)}`);
+  let message = `Saved ${roomTitle(room)}`;
+  if (changed.length === 1 && changed[0] === 'blocked') {
+    message = `${draft.blocked ? 'Blocked' : 'Unblocked'} ${roomTitle(room)}`;
+  }
+  saveEdit(room, Object.keys(next).length > 1 ? next : null, message);
 }
 
 // ---- Toast with undo ------------------------------------------------------------
