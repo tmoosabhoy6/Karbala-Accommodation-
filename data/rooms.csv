@@ -36,7 +36,7 @@ FAIZ,131,1,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
 FAIZ,132,1,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
 FAIZ,133,1,Main wing,PARTITION PARDA,Partition,4,1,1,no,,,,
 FAIZ,134,1,Main wing,PARTITION PARDA,Partition,4,1,1,no,,,,
-FAIZ,135,1,Main wing,BAIRAO ROOM / PARTITION PARDA,Partition;Ladies,7,1,0,no,,,,"Dormitory with 4 sections (4, 1, 1, 1 beds)"
+FAIZ,135,1,Main wing,BAIRAO ROOM / PARTITION PARDA,Ladies;Partition,4,1,0,no,,,,"Dormitory with 4 sections (4, 1, 1, 1 beds)"
 FAIZ,136,1,Main wing,PARTITION PARDA,Partition,4,0,0,no,,,,
 FAIZ,137,1,Main wing,PARTITION PARDA,Partition,4,1,1,no,,,,
 FAIZ,138,1,Main wing,PARTITION PARDA,Partition,5,1,0,no,,,,
