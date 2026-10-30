@@ -1,141 +1,195 @@
 import {
-  buildModel, applyFilters, totals, floorLabel, floorShort, compareFloors, compareFeatures,
+  buildModel, applyFilters, totals, withEdit, floorLabel, floorShort, compareFloors, compareFeatures,
 } from './data.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => n.toLocaleString('en-US');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
 
 const state = {
+  view: 'guest', // 'guest' | 'kg'
   buildings: new Set(),
   floors: new Set(),
+  beds: new Set(),
   wings: new Set(),
   features: new Set(),
   minPax: 0,
   query: '',
-  includeNonGuest: false,
-  view: 'floor',
+  by: 'floor', // capacity breakdown: 'floor' | 'beds' | 'feature'
 };
 
-let model; // { buildings, rooms }
-let activeRooms; // rooms in active buildings only
+let model; // { buildings, rooms } straight from the CSV files
+let rooms; // rooms in active buildings, with this device's edits applied
 let buildingName; // code -> name
 
-// ---- URL state, so a filtered view can be bookmarked or shared -------------
+// ---- Edits saved on this device -------------------------------------------------
 
-const SET_KEYS = { b: 'buildings', f: 'floors', w: 'wings', x: 'features' };
+const EDITS_KEY = 'karbala-rooms:edits:v1';
+let edits = {};
+
+function loadEdits() {
+  try { edits = JSON.parse(localStorage.getItem(EDITS_KEY)) || {}; } catch { edits = {}; }
+}
+
+function storeEdits() {
+  try { localStorage.setItem(EDITS_KEY, JSON.stringify(edits)); return true; } catch { return false; }
+}
+
+function applyEdits() {
+  const active = new Set(model.buildings.filter((b) => b.active).map((b) => b.code));
+  rooms = model.rooms.filter((r) => active.has(r.building)).map((r) => withEdit(r, edits[r.id]));
+}
+
+// ---- URL state, so a filtered view can be bookmarked or shared -------------------
+
+const SET_KEYS = { b: 'buildings', f: 'floors', bd: 'beds', w: 'wings', x: 'features' };
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  for (const [k, field] of Object.entries(SET_KEYS)) {
-    state[field] = new Set(p.getAll(k));
-  }
+  for (const [k, field] of Object.entries(SET_KEYS)) state[field] = new Set(p.getAll(k));
+  state.view = p.get('v') === 'kg' ? 'kg' : 'guest';
   state.minPax = Math.max(0, parseInt(p.get('n'), 10) || 0);
   state.query = p.get('q') || '';
-  state.includeNonGuest = p.get('all') === '1';
-  state.view = p.get('by') === 'feature' ? 'feature' : 'floor';
+  state.by = ['beds', 'feature'].includes(p.get('by')) ? p.get('by') : 'floor';
 }
 
 function writeUrl() {
   const p = new URLSearchParams();
-  for (const [k, field] of Object.entries(SET_KEYS)) {
-    for (const v of state[field]) p.append(k, v);
-  }
+  if (state.view === 'kg') p.set('v', 'kg');
+  for (const [k, field] of Object.entries(SET_KEYS)) for (const v of state[field]) p.append(k, v);
   if (state.minPax) p.set('n', state.minPax);
   if (state.query) p.set('q', state.query);
-  if (state.includeNonGuest) p.set('all', '1');
-  if (state.view === 'feature') p.set('by', 'feature');
+  if (state.by !== 'floor') p.set('by', state.by);
   const qs = p.toString();
   history.replaceState(null, '', qs ? `?${qs}` : location.pathname);
 }
 
-// ---- Filter controls ----------------------------------------------------------
+// ---- Which rooms are in play --------------------------------------------------
 
-function chip(label, pressed, data, extra = '') {
-  return `<button type="button" class="chip" aria-pressed="${pressed}" ${data}>${esc(label)}${extra}</button>`;
+const isKg = () => state.view === 'kg';
+
+// Every room in the current tab, before any filter.
+function pool() {
+  return rooms.filter((r) => r.kg === isKg());
 }
 
-function renderChipGroup(el, field, options) {
-  const all = chip('All', state[field].size === 0, `data-field="${field}" data-value=""`);
+// The filters that apply in the current tab. KG rooms are only filtered by
+// building, floor and search.
+function activeFilters(overrides = {}) {
+  const f = { ...state, ...overrides };
+  if (isKg()) return { ...f, beds: new Set(), wings: new Set(), features: new Set(), minPax: 0 };
+  return f;
+}
+
+function filtered() {
+  return applyFilters(pool(), activeFilters());
+}
+
+// ---- Filter controls ------------------------------------------------------------
+
+function chip(label, pressed, data, count) {
+  const c = count != null ? `<span class="chip-count">${count}</span>` : '';
+  return `<button type="button" class="chip" aria-pressed="${pressed}" ${data}>${esc(label)}${c}</button>`;
+}
+
+function renderChipGroup(el, field, options, withAll = true) {
+  const all = withAll ? chip('All', state[field].size === 0, `data-field="${field}" data-value=""`) : '';
   el.innerHTML = all + options.map((o) =>
-    chip(o.label, state[field].has(o.value), `data-field="${field}" data-value="${esc(o.value)}"`,
-      o.count != null ? `<span class="chip-count">${o.count}</span>` : ''),
+    chip(o.label, state[field].has(o.value), `data-field="${field}" data-value="${esc(o.value)}"`, o.count),
   ).join('');
 }
 
-// Rooms that the base filters (building, guest toggle) allow, used to decide
-// which floor / wing / feature options make sense to offer.
-function baseRooms() {
-  return activeRooms.filter((r) =>
-    (state.includeNonGuest || r.guestRoom) &&
-    (state.buildings.size === 0 || state.buildings.has(r.building)));
-}
-
 function renderFilters() {
-  const activeBuildings = model.buildings.filter((b) => b.active);
-  renderChipGroup($('f-building'), 'buildings', activeBuildings.map((b) => ({ value: b.code, label: b.name })));
+  const all = pool();
+  const codes = new Set(all.map((r) => r.building));
+  renderChipGroup($('f-building'), 'buildings',
+    model.buildings.filter((b) => codes.has(b.code)).map((b) => ({ value: b.code, label: b.name })));
 
-  const base = baseRooms();
-  const floors = [...new Set(base.map((r) => r.floor))].sort(compareFloors);
+  const inBuildings = all.filter((r) => state.buildings.size === 0 || state.buildings.has(r.building));
+  const floors = [...new Set(inBuildings.map((r) => r.floor))].sort(compareFloors);
   renderChipGroup($('f-floor'), 'floors', floors.map((f) => ({ value: f, label: floorShort(f) })));
 
-  const wings = [...new Set(base.map((r) => r.wing).filter(Boolean))].sort();
-  $('wing-set').hidden = wings.length < 2 && state.wings.size === 0;
-  renderChipGroup($('f-wing'), 'wings', wings.map((w) => ({ value: w, label: w })));
-
-  // Feature counts reflect every other active filter, so the number on a chip
-  // is how many rooms you'd see if you added it.
-  const withoutFeatures = applyFilters(activeRooms, { ...state, features: new Set() });
-  const counts = new Map();
-  for (const r of base) for (const f of r.features) counts.set(f, 0);
-  for (const f of state.features) counts.set(f, 0);
-  for (const r of withoutFeatures) {
-    if ([...state.features].every((f) => r.features.includes(f))) {
-      for (const f of r.features) counts.set(f, counts.get(f) + 1);
-    }
-  }
-  const features = [...counts.keys()].sort(compareFeatures);
-  $('f-feature').innerHTML = features.map((f) =>
-    chip(f, state.features.has(f), `data-field="features" data-value="${esc(f)}"`,
-      `<span class="chip-count">${counts.get(f)}</span>`)).join('');
-
-  $('pax-value').textContent = state.minPax ? `${state.minPax}+ people` : 'Any';
-  $('pax-down').disabled = state.minPax === 0;
+  $('q').placeholder = isKg() ? 'Find a room or a name' : 'Find a room number';
+  $('q-label').textContent = $('q').placeholder;
   $('q').value = state.query;
-  $('f-nonguest').checked = state.includeNonGuest;
 
-  const moreActive = state.wings.size + state.features.size + (state.minPax ? 1 : 0) + (state.includeNonGuest ? 1 : 0);
-  $('more-count').textContent = moreActive ? ` · ${moreActive}` : '';
-  const anyActive = moreActive + state.buildings.size + state.floors.size + (state.query ? 1 : 0);
+  let moreActive = 0;
+  if (!isKg()) {
+    // Bed chips show how many rooms each bed count would give with the other filters.
+    const withoutBeds = applyFilters(all, activeFilters({ beds: new Set() }));
+    const bedCounts = new Map();
+    for (const r of inBuildings) bedCounts.set(String(r.beds), 0);
+    for (const r of withoutBeds) bedCounts.set(String(r.beds), bedCounts.get(String(r.beds)) + 1);
+    const beds = [...bedCounts.keys()].sort((a, b) => a - b);
+    renderChipGroup($('f-beds'), 'beds', beds.map((b) => ({ value: b, label: b, count: bedCounts.get(b) })));
+
+    const wings = [...new Set(inBuildings.map((r) => r.wing).filter(Boolean))].sort();
+    $('wing-set').hidden = wings.length < 2 && state.wings.size === 0;
+    renderChipGroup($('f-wing'), 'wings', wings.map((w) => ({ value: w, label: w })));
+
+    // Feature counts: how many rooms you'd see if you added that feature.
+    const withoutFeatures = applyFilters(all, activeFilters({ features: new Set() }));
+    const counts = new Map();
+    for (const r of inBuildings) for (const f of r.features) counts.set(f, 0);
+    for (const f of state.features) counts.set(f, 0);
+    for (const r of withoutFeatures) {
+      if ([...state.features].every((f) => r.features.includes(f))) {
+        for (const f of r.features) counts.set(f, counts.get(f) + 1);
+      }
+    }
+    renderChipGroup($('f-feature'), 'features',
+      [...counts.keys()].sort(compareFeatures).map((f) => ({ value: f, label: f, count: counts.get(f) })), false);
+
+    $('pax-value').textContent = state.minPax ? `${state.minPax}+ people` : 'Any';
+    $('pax-down').disabled = state.minPax === 0;
+
+    moreActive = state.wings.size + state.features.size + (state.minPax ? 1 : 0);
+    $('more-count').textContent = moreActive ? ` · ${moreActive}` : '';
+  }
+
+  const f = activeFilters();
+  const anyActive = f.buildings.size + f.floors.size + f.beds.size + moreActive + (f.query ? 1 : 0);
   $('clear').hidden = anyActive === 0;
 }
 
-// ---- Summary ------------------------------------------------------------------
+// ---- Summary ----------------------------------------------------------------------
 
-function renderSummary(rooms) {
-  const t = totals(rooms);
-  const all = totals(baseAll());
-  const filtered = t.rooms !== all.rooms;
-  const of = (v, total) => (filtered ? `<span class="of">of ${fmt(total)}</span>` : '');
-  $('summary').innerHTML = `
-    <div class="stat"><span class="stat-label">Rooms</span><span class="stat-value">${fmt(t.rooms)}</span>${of(t.rooms, all.rooms)}</div>
-    <div class="stat"><span class="stat-label">Beds</span><span class="stat-value">${fmt(t.beds)}</span>${of(t.beds, all.beds)}</div>
-    <div class="stat"><span class="stat-label">Extra mattresses</span><span class="stat-value">${fmt(t.extra)}</span>${of(t.extra, all.extra)}</div>
-    <div class="stat stat-main"><span class="stat-label">Fits up to</span><span class="stat-value">${fmt(t.maxPax)}</span><span class="of">${filtered ? `of ${fmt(all.maxPax)} people` : 'people'}</span></div>`;
+function stat(label, value, sub, main = false) {
+  return `<div class="stat${main ? ' stat-main' : ''}"><span class="stat-label">${label}</span>`
+    + `<span class="stat-value">${fmt(value)}</span>${sub ? `<span class="of">${sub}</span>` : ''}</div>`;
 }
 
-// Everything in active buildings, respecting only the guest-room toggle.
-function baseAll() {
-  return activeRooms.filter((r) => state.includeNonGuest || r.guestRoom);
+function renderSummary(list) {
+  const el = $('summary');
+  if (isKg()) {
+    const occupied = list.filter(isOccupied).length;
+    el.className = 'summary summary-3';
+    el.innerHTML = stat('KG rooms', list.length, '')
+      + stat('Someone staying', occupied, '', true)
+      + stat('No one listed', list.length - occupied, '');
+    return;
+  }
+  const t = totals(list);
+  const all = totals(pool());
+  const isFiltered = t.rooms !== all.rooms;
+  const of = (total) => (isFiltered ? `of ${fmt(total)}` : '');
+  el.className = 'summary';
+  el.innerHTML = stat('Rooms', t.rooms, of(all.rooms))
+    + stat('Beds', t.beds, of(all.beds))
+    + stat('Extra mattresses', t.extra, of(all.extra))
+    + stat('Fits up to', t.maxPax, isFiltered ? `of ${fmt(all.maxPax)} people` : 'people', true);
 }
 
-// ---- Capacity breakdown -------------------------------------------------------
+const isOccupied = (r) => r.occupant.trim() !== '' || r.people > 0;
 
-function row({ label, sub, t, max, pressed, data }) {
+// ---- Capacity breakdown ---------------------------------------------------------
+
+function row({ label, t, max, pressed, data }) {
   const pct = max ? Math.max(2, Math.round((t.maxPax / max) * 100)) : 0;
   return `
     <button type="button" class="brow" aria-pressed="${pressed}" ${data}>
-      <span class="brow-label">${esc(label)}${sub ? `<span class="brow-sub">${esc(sub)}</span>` : ''}</span>
+      <span class="brow-label">${esc(label)}</span>
       <span class="num">${fmt(t.rooms)}</span>
       <span class="num">${fmt(t.beds)}</span>
       <span class="num strong">${fmt(t.maxPax)}</span>
@@ -148,18 +202,26 @@ const HEAD = `
     <span></span><span class="num">Rooms</span><span class="num">Beds</span><span class="num">Up to</span>
   </div>`;
 
-function renderBreakdown(rooms) {
-  const el = $('breakdown');
-  $('tab-floor').setAttribute('aria-selected', state.view === 'floor');
-  $('tab-feature').setAttribute('aria-selected', state.view === 'feature');
+function groupBy(list, keyOf) {
+  const map = new Map();
+  for (const r of list) for (const k of keyOf(r)) {
+    if (!map.has(k)) map.set(k, []);
+    map.get(k).push(r);
+  }
+  return map;
+}
 
-  if (rooms.length === 0) {
+function renderBreakdown(list) {
+  const el = $('breakdown');
+  for (const b of document.querySelectorAll('[data-by]')) b.setAttribute('aria-selected', b.dataset.by === state.by);
+
+  if (list.length === 0) {
     el.innerHTML = '<p class="empty-small">Nothing to count with these filters.</p>';
     return;
   }
 
-  if (state.view === 'floor') {
-    const groups = groupByBuildingFloor(rooms);
+  if (state.by === 'floor') {
+    const groups = groupByBuildingFloor(list);
     const max = Math.max(...groups.flatMap((g) => g.floors.map((f) => totals(f.rooms).maxPax)));
     el.innerHTML = groups.map((g) => {
       const bt = totals(g.rooms);
@@ -177,33 +239,42 @@ function renderBreakdown(rooms) {
           })).join('')}
         </div>`;
     }).join('');
-  } else {
-    const byFeature = new Map();
-    for (const r of rooms) {
-      const feats = r.features.length ? r.features : ['No listed features'];
-      for (const f of feats) {
-        if (!byFeature.has(f)) byFeature.set(f, []);
-        byFeature.get(f).push(r);
-      }
-    }
-    const keys = [...byFeature.keys()].sort((a, b) =>
-      (a === 'No listed features') - (b === 'No listed features') || compareFeatures(a, b));
-    const max = Math.max(...keys.map((k) => totals(byFeature.get(k)).maxPax));
-    el.innerHTML = `<div class="bgroup">${HEAD}${keys.map((k) => row({
-      label: k,
-      t: totals(byFeature.get(k)),
-      max,
-      pressed: state.features.has(k),
-      data: k === 'No listed features' ? 'disabled' : `data-feature="${esc(k)}"`,
-    })).join('')}</div>
-    <p class="note">A room with several features is counted under each of them.</p>`;
+    return;
   }
+
+  if (state.by === 'beds') {
+    const byBeds = groupBy(list, (r) => [r.beds]);
+    const keys = [...byBeds.keys()].sort((a, b) => a - b);
+    const max = Math.max(...keys.map((k) => totals(byBeds.get(k)).maxPax));
+    el.innerHTML = `<div class="bgroup">${HEAD}${keys.map((k) => row({
+      label: k === 1 ? '1 bed' : `${k} beds`,
+      t: totals(byBeds.get(k)),
+      max,
+      pressed: state.beds.has(String(k)),
+      data: `data-beds="${k}"`,
+    })).join('')}</div>
+    <p class="note">Rooms grouped by their number of fixed beds. "Up to" adds the extra mattresses.</p>`;
+    return;
+  }
+
+  const NONE = 'No listed features';
+  const byFeature = groupBy(list, (r) => (r.features.length ? r.features : [NONE]));
+  const keys = [...byFeature.keys()].sort((a, b) => (a === NONE) - (b === NONE) || compareFeatures(a, b));
+  const max = Math.max(...keys.map((k) => totals(byFeature.get(k)).maxPax));
+  el.innerHTML = `<div class="bgroup">${HEAD}${keys.map((k) => row({
+    label: k,
+    t: totals(byFeature.get(k)),
+    max,
+    pressed: state.features.has(k),
+    data: k === NONE ? 'disabled' : `data-feature="${esc(k)}"`,
+  })).join('')}</div>
+  <p class="note">A room with several features is counted under each of them.</p>`;
 }
 
-function groupByBuildingFloor(rooms) {
+function groupByBuildingFloor(list) {
   const order = new Map(model.buildings.map((b, i) => [b.code, i]));
   const map = new Map();
-  for (const r of rooms) {
+  for (const r of list) {
     if (!map.has(r.building)) map.set(r.building, new Map());
     const floors = map.get(r.building);
     if (!floors.has(r.floor)) floors.set(r.floor, []);
@@ -220,78 +291,193 @@ function groupByBuildingFloor(rooms) {
     }));
 }
 
-// ---- Room tiles ---------------------------------------------------------------
+// ---- Room tiles -----------------------------------------------------------------
 
-function tile(r) {
-  const tags = [...r.features.filter((f) => f !== 'Staff')];
+const EDITED = '<span class="edited" title="Changed on this device">Edited</span>';
+
+function guestTile(r) {
+  const tags = [...r.features];
   if (r.wing === 'New wing') tags.unshift('New wing');
-  const nonGuest = !r.guestRoom;
-  const status = nonGuest
-    ? `<span class="tile-flag">${r.features.includes('Staff') ? 'Staff room' : 'Not a guest room'}</span>`
-    : '';
-  let cap = `${r.beds} ${r.beds === 1 ? 'bed' : 'beds'} · up to <strong>${r.maxPax}</strong>`;
-  if (r.maxPax === 0) cap = r.features.includes('Staff') ? 'Beds not recorded' : 'No beds';
-  const title = [r.roomType && `Listed as: ${r.roomType}`, r.notes].filter(Boolean).join('\n');
   return `
-    <li class="tile${nonGuest ? ' tile-off' : ''}"${title ? ` title="${esc(title)}"` : ''}>
-      <div class="tile-top">
-        <span class="tile-room">${esc(r.room)}</span>
-      </div>
-      <div class="tile-cap">${cap}</div>
-      ${r.extra ? `<div class="tile-extra">+${r.extra} extra ${r.extra === 1 ? 'mattress' : 'mattresses'}</div>` : ''}
-      ${tags.length ? `<div class="tile-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
-      ${r.notes && !nonGuest ? `<div class="tile-note">${esc(r.notes)}</div>` : ''}
-      ${status}
-    </li>`;
+    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}</div>
+    <div class="tile-cap">${plural(r.beds, 'bed', 'beds')} · up to <strong>${r.maxPax}</strong></div>
+    ${r.extra ? `<div class="tile-extra">+${plural(r.extra, 'extra mattress', 'extra mattresses')}</div>` : ''}
+    ${tags.length ? `<div class="tile-tags">${tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
+    ${r.notes ? `<div class="tile-note">${esc(r.notes)}</div>` : ''}`;
 }
 
-function renderRooms(rooms) {
+function kgTile(r) {
+  const who = r.occupant.trim()
+    ? `<div class="tile-who">${esc(r.occupant)}</div>`
+    : '<div class="tile-who tile-empty">No one listed</div>';
+  return `
+    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}</div>
+    ${who}
+    ${r.people ? `<div class="tile-extra">${plural(r.people, 'person', 'people')}</div>` : ''}
+    ${r.extra ? `<div class="tile-extra">+${plural(r.extra, 'extra mattress', 'extra mattresses')}</div>` : ''}
+    ${r.notes ? `<div class="tile-note">${esc(r.notes)}</div>` : ''}`;
+}
+
+function renderRooms(list) {
   const el = $('rooms');
-  $('rooms-title').textContent = rooms.length === 1 ? '1 room' : `${fmt(rooms.length)} rooms`;
-  if (rooms.length === 0) {
+  $('rooms-title').textContent = plural(list.length, 'room', 'rooms');
+  if (list.length === 0) {
     el.innerHTML = `
       <div class="empty">
         <p class="empty-title">No rooms match these filters</p>
-        <p>Try removing a feature or lowering “Fits at least”.</p>
+        <p>${isKg() ? 'Try a different name or room number.' : 'Try removing a filter or lowering “Fits at least”.'}</p>
         <button type="button" class="btn" data-action="clear">Clear all filters</button>
       </div>`;
     return;
   }
-  el.innerHTML = groupByBuildingFloor(rooms).map((g) => g.floors.map((f) => {
+  el.innerHTML = groupByBuildingFloor(list).map((g) => g.floors.map((f) => {
     const t = totals(f.rooms);
+    const total = isKg()
+      ? `${plural(t.rooms, 'room', 'rooms')} · ${fmt(f.rooms.filter(isOccupied).length)} with someone`
+      : `${plural(t.rooms, 'room', 'rooms')} · up to ${fmt(t.maxPax)}`;
     return `
       <div class="floor">
         <h3 class="floor-title">
           <span>${esc(buildingName.get(g.code))} <span class="dot" aria-hidden="true">·</span> ${esc(floorLabel(f.floor))}</span>
-          <span class="floor-total">${fmt(t.rooms)} rooms · up to ${fmt(t.maxPax)}</span>
+          <span class="floor-total">${total}</span>
         </h3>
-        <ul class="grid">${f.rooms.map(tile).join('')}</ul>
+        <ul class="grid">${f.rooms.map((r) => `
+          <li><button type="button" class="tile${r.kg && !isOccupied(r) ? ' tile-off' : ''}" data-room="${esc(r.id)}">
+            ${r.kg ? kgTile(r) : guestTile(r)}
+          </button></li>`).join('')}</ul>
       </div>`;
   }).join('')).join('');
 }
 
-// ---- Wiring -------------------------------------------------------------------
+// ---- Room panel (edit) ------------------------------------------------------------
+
+let editing = null; // { room, draft }
+
+const roomTitle = (r) => (/\d/.test(r.room) ? `Room ${r.room}` : r.room);
+
+function openRoom(id) {
+  const room = rooms.find((r) => r.id === id);
+  if (!room) return;
+  editing = {
+    room,
+    draft: { extra: room.extra, occupant: room.occupant, people: room.people, notes: room.notes },
+  };
+  const base = room.original || room;
+  $('rd-where').textContent = `${buildingName.get(room.building)} · ${floorLabel(room.floor)}${room.wing ? ` · ${room.wing}` : ''}`;
+  $('rd-title').textContent = roomTitle(room);
+
+  const facts = [];
+  if (!room.kg || room.beds) facts.push(['Beds', fmt(room.beds)]);
+  if (room.features.length) facts.push(['Features', room.features.join(', ')]);
+  if (room.roomType) facts.push(['Listed as', room.roomType]);
+  if (room.edited) facts.push(['Original', `${plural(base.extra, 'extra mattress', 'extra mattresses')}${base.occupant ? ` · ${base.occupant}` : ''}`]);
+  $('rd-facts').innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+
+  for (const el of document.querySelectorAll('.kg-field')) el.hidden = !room.kg;
+  $('rd-occupant').value = room.occupant;
+  $('rd-notes').value = room.notes;
+  $('rd-reset').hidden = !room.edited;
+  renderDraft();
+  $('room-dialog').showModal();
+}
+
+function renderDraft() {
+  const { room, draft } = editing;
+  $('rd-extra').textContent = draft.extra;
+  $('rd-people').textContent = draft.people ? plural(draft.people, 'person', 'people') : 'Not set';
+  $('rd-fits').textContent = `${plural(room.beds, 'bed', 'beds')} + ${plural(draft.extra, 'mattress', 'mattresses')} = fits up to ${room.beds + draft.extra}`;
+  for (const b of document.querySelectorAll('[data-step]')) {
+    if (Number(b.dataset.delta) < 0) b.disabled = draft[b.dataset.step] <= 0;
+  }
+}
+
+// Saves the edit for one room and offers an undo that puts back what was there.
+function saveEdit(room, next, message) {
+  const before = edits[room.id];
+  if (next) edits[room.id] = next; else delete edits[room.id];
+  const ok = storeEdits();
+  applyEdits();
+  render();
+  showToast(ok ? message : 'Could not save on this device (storage is blocked)', ok ? () => {
+    if (before) edits[room.id] = before; else delete edits[room.id];
+    storeEdits();
+    applyEdits();
+    render();
+  } : null);
+}
+
+// action: 'save' | 'reset' | anything else (cancel)
+function finishEdit(action) {
+  if (!editing) return;
+  const { room, draft } = editing;
+  editing = null;
+  if (action === 'reset') {
+    saveEdit(room, null, `${roomTitle(room)} reset to original`);
+    return;
+  }
+  if (action !== 'save') return;
+
+  draft.occupant = $('rd-occupant').value.trim();
+  draft.notes = $('rd-notes').value.trim();
+  // Only keep the fields that differ from the room list.
+  const base = room.original || room;
+  const next = {};
+  for (const k of ['extra', 'occupant', 'people', 'notes']) {
+    if (draft[k] !== base[k]) next[k] = draft[k];
+  }
+  const changed = ['extra', 'occupant', 'people', 'notes'].some((k) => draft[k] !== room[k]);
+  if (!changed) return;
+  next.at = new Date().toISOString();
+  saveEdit(room, Object.keys(next).length > 1 ? next : null, `Saved ${roomTitle(room)}`);
+}
+
+// ---- Toast with undo ------------------------------------------------------------
+
+let toastTimer;
+let toastUndo;
+
+function showToast(text, undo) {
+  $('toast-text').textContent = text;
+  $('toast-undo').hidden = !undo;
+  toastUndo = undo;
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, 6000);
+}
+
+// ---- Wiring ---------------------------------------------------------------------
 
 function render() {
-  // Drop selections that no longer exist (e.g. a floor after changing building).
-  const base = baseRooms();
-  const floors = new Set(base.map((r) => r.floor));
-  for (const f of state.floors) if (!floors.has(f)) state.floors.delete(f);
-  const wings = new Set(base.map((r) => r.wing));
-  for (const w of state.wings) if (!wings.has(w)) state.wings.delete(w);
+  document.body.dataset.view = state.view;
+  $('view-guest').setAttribute('aria-selected', !isKg());
+  $('view-kg').setAttribute('aria-selected', isKg());
+  $('sub').textContent = isKg()
+    ? 'Who is staying in the KG and staff rooms'
+    : 'Guest room capacity by building, floor, beds and feature';
 
-  const rooms = applyFilters(activeRooms, state);
+  // Drop selections that no longer exist (e.g. a floor after changing building).
+  const all = pool();
+  const valid = {
+    buildings: new Set(all.map((r) => r.building)),
+    floors: new Set(all.filter((r) => state.buildings.size === 0 || state.buildings.has(r.building)).map((r) => r.floor)),
+    wings: new Set(all.map((r) => r.wing)),
+  };
+  for (const [field, ok] of Object.entries(valid)) {
+    for (const v of state[field]) if (!ok.has(v)) state[field].delete(v);
+  }
+
+  const list = filtered();
   renderFilters();
-  renderSummary(rooms);
-  renderBreakdown(rooms);
-  renderRooms(rooms);
+  renderSummary(list);
+  if (!isKg()) renderBreakdown(list);
+  renderRooms(list);
   writeUrl();
 }
 
 function clearAll() {
   Object.assign(state, {
-    buildings: new Set(), floors: new Set(), wings: new Set(), features: new Set(),
-    minPax: 0, query: '', includeNonGuest: false,
+    buildings: new Set(), floors: new Set(), beds: new Set(), wings: new Set(), features: new Set(),
+    minPax: 0, query: '',
   });
   render();
 }
@@ -302,7 +488,18 @@ function toggle(field, value) {
   else state[field].add(value);
 }
 
+function setView(view) {
+  if (state.view === view) return;
+  state.view = view;
+  state.floors.clear();
+  state.query = '';
+  render();
+}
+
 function wire() {
+  $('view-guest').addEventListener('click', () => setView('guest'));
+  $('view-kg').addEventListener('click', () => setView('kg'));
+
   document.querySelector('.filters').addEventListener('click', (e) => {
     const c = e.target.closest('.chip');
     if (!c) return;
@@ -313,9 +510,9 @@ function wire() {
   $('breakdown').addEventListener('click', (e) => {
     const b = e.target.closest('.brow');
     if (!b || b.disabled) return;
-    if (b.dataset.feature) {
-      toggle('features', b.dataset.feature);
-    } else if (b.dataset.floor) {
+    if (b.dataset.feature) toggle('features', b.dataset.feature);
+    else if (b.dataset.beds) toggle('beds', b.dataset.beds);
+    else if (b.dataset.floor) {
       // Tapping a floor row shows just that floor; tapping it again goes back.
       const { building, floor } = b.dataset;
       const already = state.buildings.size === 1 && state.buildings.has(building)
@@ -329,16 +526,39 @@ function wire() {
     }
   });
 
-  for (const id of ['tab-floor', 'tab-feature']) {
-    $(id).addEventListener('click', () => { state.view = id === 'tab-floor' ? 'floor' : 'feature'; render(); });
+  for (const b of document.querySelectorAll('[data-by]')) {
+    b.addEventListener('click', () => { state.by = b.dataset.by; render(); });
   }
 
   $('q').addEventListener('input', (e) => { state.query = e.target.value; render(); });
   $('pax-up').addEventListener('click', () => { state.minPax += 1; render(); });
   $('pax-down').addEventListener('click', () => { state.minPax = Math.max(0, state.minPax - 1); render(); });
-  $('f-nonguest').addEventListener('change', (e) => { state.includeNonGuest = e.target.checked; render(); });
   $('clear').addEventListener('click', clearAll);
-  $('rooms').addEventListener('click', (e) => { if (e.target.closest('[data-action="clear"]')) clearAll(); });
+
+  $('rooms').addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="clear"]')) { clearAll(); return; }
+    const tile = e.target.closest('[data-room]');
+    if (tile) openRoom(tile.dataset.room);
+  });
+
+  $('room-form').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-step]');
+    if (!b || !editing) return;
+    const k = b.dataset.step;
+    editing.draft[k] = Math.max(0, editing.draft[k] + Number(b.dataset.delta));
+    renderDraft();
+  });
+  // The form uses method="dialog", so submitting closes the panel; the edit is
+  // applied right away rather than waiting for the dialog's close event.
+  $('room-form').addEventListener('submit', (e) => finishEdit(e.submitter?.value));
+  $('rd-reset').addEventListener('click', () => { finishEdit('reset'); $('room-dialog').close(); });
+  $('room-dialog').addEventListener('close', () => finishEdit('cancel'));
+
+  $('toast-undo').addEventListener('click', () => {
+    $('toast').hidden = true;
+    if (toastUndo) toastUndo();
+    toastUndo = null;
+  });
 
   $('more-toggle').addEventListener('click', () => {
     const open = $('more-toggle').getAttribute('aria-expanded') !== 'true';
@@ -367,13 +587,13 @@ async function load() {
       </div>`;
     return;
   }
-  const active = new Set(model.buildings.filter((x) => x.active).map((x) => x.code));
-  activeRooms = model.rooms.filter((x) => active.has(x.building));
   buildingName = new Map(model.buildings.map((x) => [x.code, x.name]));
+  loadEdits();
+  applyEdits();
 
   readUrl();
   // Open "More filters" on load if any of them are in use.
-  if (state.wings.size || state.features.size || state.minPax || state.includeNonGuest) {
+  if (state.wings.size || state.features.size || state.minPax) {
     $('more-toggle').setAttribute('aria-expanded', 'true');
     $('more-filters').classList.add('open');
   }

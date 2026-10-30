@@ -28,7 +28,7 @@ export function compareFloors(a, b) {
 // Feature chips appear in this order; features not listed here follow alphabetically.
 export const FEATURE_ORDER = [
   'Ladies', 'Gents', 'Suite', 'Partition', '2 bedrooms', '2 bathrooms',
-  'Bathroom inside', 'Bathroom outside', 'Window', 'No window', 'Sofa bed', 'Low ceiling', 'Staff',
+  'Bathroom inside', 'Bathroom outside', 'Window', 'No window', 'Sofa bed', 'Low ceiling',
 ];
 
 export function compareFeatures(a, b) {
@@ -110,6 +110,7 @@ export function buildModel(buildingsCsv, roomsCsv) {
     const beds = count(r.beds, `${where} beds`, errors);
     const extraMattress = count(r.extra_mattress, `${where} extra_mattress`, errors);
     const extra2 = count(r.extra_2, `${where} extra_2`, errors);
+    const people = count(r.people, `${where} people`, errors);
     return {
       id: key,
       building: r.building,
@@ -121,7 +122,9 @@ export function buildModel(buildingsCsv, roomsCsv) {
       beds,
       extra: extraMattress + extra2,
       maxPax: beds + extraMattress + extra2,
-      guestRoom: yes(r.guest_room),
+      kg: yes(r.kg),
+      occupant: r.occupant,
+      people,
       notes: r.notes,
       sortOrder: i,
     };
@@ -137,17 +140,32 @@ export function totals(rooms) {
   return { rooms: rooms.length, beds, extra, maxPax };
 }
 
-// filters: { buildings: Set, floors: Set, wings: Set, features: Set, minPax, query, includeNonGuest }
-// Empty sets mean "any". Features must all be present (AND).
+// Replaces a room's editable fields with the values saved on this device.
+// edit: { extra?, occupant?, people?, notes? }
+export function withEdit(room, edit) {
+  if (!edit) return room;
+  const r = { ...room, edited: true, original: room };
+  if (edit.extra != null) { r.extra = edit.extra; r.maxPax = r.beds + edit.extra; }
+  if (edit.occupant != null) r.occupant = edit.occupant;
+  if (edit.people != null) r.people = edit.people;
+  if (edit.notes != null) r.notes = edit.notes;
+  return r;
+}
+
+const squash = (s) => s.toLowerCase().replace(/\s+/g, '');
+
+// filters: { buildings, floors, wings, features, beds: Set; minPax; query }
+// Empty sets mean "any". Features must all be present (AND); bed counts are any-of.
+// The query matches the room label or the name of whoever is staying there.
 export function applyFilters(rooms, f) {
-  const q = f.query.trim().toLowerCase().replace(/\s+/g, '');
+  const q = squash(f.query.trim());
   return rooms.filter((r) =>
-    (f.includeNonGuest || r.guestRoom) &&
     (f.buildings.size === 0 || f.buildings.has(r.building)) &&
     (f.floors.size === 0 || f.floors.has(r.floor)) &&
     (f.wings.size === 0 || f.wings.has(r.wing)) &&
+    (f.beds.size === 0 || f.beds.has(String(r.beds))) &&
     [...f.features].every((feat) => r.features.includes(feat)) &&
     r.maxPax >= f.minPax &&
-    (q === '' || r.room.toLowerCase().replace(/\s+/g, '').includes(q)),
+    (q === '' || squash(r.room).includes(q) || squash(r.occupant).includes(q)),
   );
 }

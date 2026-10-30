@@ -5,24 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f6f6f3">
   <title>Karbala Rooms</title>
-  <meta name="description" content="Room capacity by building, floor and feature.">
+  <meta name="description" content="Room capacity by building, floor and feature, and who is staying in the KG rooms.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 23V12l7-4 7 4v11h-5v-6h-4v6z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <h1>Karbala Rooms</h1>
-      <p class="sub">Room capacity by building, floor and feature</p>
+      <div>
+        <h1>Karbala Rooms</h1>
+        <p class="sub" id="sub">Room capacity by building, floor and feature</p>
+      </div>
+      <div class="segmented views" role="tablist" aria-label="Which rooms">
+        <button type="button" role="tab" id="view-guest" aria-selected="true">Guest rooms</button>
+        <button type="button" role="tab" id="view-kg" aria-selected="false">KG &amp; staff</button>
+      </div>
     </div>
   </header>
 
   <div class="layout">
     <aside class="filters" aria-label="Filters">
       <div class="search">
-        <label for="q" class="visually-hidden">Find a room number</label>
+        <label for="q" class="visually-hidden" id="q-label">Find a room number</label>
         <svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="9" cy="9" r="6"/><path d="m14 14 4 4"/></svg>
-        <input id="q" type="search" placeholder="Find a room number" autocomplete="off" inputmode="search">
+        <input id="q" type="search" placeholder="Find a room number" autocomplete="off">
       </div>
 
       <fieldset>
@@ -35,11 +41,16 @@
         <div class="chips" id="f-floor"></div>
       </fieldset>
 
-      <button type="button" class="more-toggle" id="more-toggle" aria-expanded="false" aria-controls="more-filters">
+      <fieldset class="guest-only">
+        <legend>Beds <span class="legend-hint">fixed beds in the room</span></legend>
+        <div class="chips" id="f-beds"></div>
+      </fieldset>
+
+      <button type="button" class="more-toggle guest-only" id="more-toggle" aria-expanded="false" aria-controls="more-filters">
         More filters<span class="more-count" id="more-count"></span>
       </button>
 
-      <div class="more" id="more-filters">
+      <div class="more guest-only" id="more-filters">
         <fieldset id="wing-set">
           <legend>Wing</legend>
           <div class="chips" id="f-wing"></div>
@@ -58,12 +69,6 @@
             <button type="button" id="pax-up" aria-label="More people">+</button>
           </div>
         </fieldset>
-
-        <label class="switch">
-          <input type="checkbox" id="f-nonguest">
-          <span class="track" aria-hidden="true"></span>
-          <span>Include staff and non-guest rooms</span>
-        </label>
       </div>
 
       <button type="button" class="clear" id="clear" hidden>Clear all filters</button>
@@ -74,22 +79,85 @@
         <div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div>
       </section>
 
-      <section class="panel" aria-labelledby="breakdown-title">
+      <section class="panel guest-only" aria-labelledby="breakdown-title">
         <div class="panel-head">
           <h2 id="breakdown-title">Capacity</h2>
           <div class="segmented" role="tablist" aria-label="Group capacity by">
-            <button type="button" role="tab" id="tab-floor" aria-selected="true">By floor</button>
-            <button type="button" role="tab" id="tab-feature" aria-selected="false">By feature</button>
+            <button type="button" role="tab" data-by="floor" aria-selected="true">By floor</button>
+            <button type="button" role="tab" data-by="beds" aria-selected="false">By beds</button>
+            <button type="button" role="tab" data-by="feature" aria-selected="false">By feature</button>
           </div>
         </div>
         <div id="breakdown"><div class="skeleton block"></div></div>
       </section>
 
       <section aria-labelledby="rooms-title">
-        <h2 id="rooms-title" class="section-title">Rooms</h2>
+        <div class="rooms-head">
+          <h2 id="rooms-title" class="section-title">Rooms</h2>
+          <span class="hint">Tap a room to edit it</span>
+        </div>
         <div id="rooms"><div class="skeleton block tall"></div></div>
       </section>
     </main>
+  </div>
+
+  <dialog id="room-dialog" aria-labelledby="rd-title">
+    <form method="dialog" id="room-form">
+      <header class="rd-head">
+        <div>
+          <p class="rd-where" id="rd-where"></p>
+          <h2 id="rd-title"></h2>
+        </div>
+        <button type="submit" value="cancel" class="icon-btn" aria-label="Close">✕</button>
+      </header>
+
+      <div class="rd-body">
+        <dl class="facts" id="rd-facts"></dl>
+
+        <div class="field kg-field">
+          <label for="rd-occupant">Staying here</label>
+          <input id="rd-occupant" type="text" autocomplete="off" placeholder="Name, or leave empty if vacant">
+        </div>
+
+        <div class="field kg-field">
+          <span class="field-label" id="rd-people-label">People staying</span>
+          <div class="stepper" role="group" aria-labelledby="rd-people-label">
+            <button type="button" data-step="people" data-delta="-1" aria-label="Fewer people">−</button>
+            <output id="rd-people">Not set</output>
+            <button type="button" data-step="people" data-delta="1" aria-label="More people">+</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="field-label" id="rd-extra-label">Extra mattresses</span>
+          <div class="stepper" role="group" aria-labelledby="rd-extra-label">
+            <button type="button" data-step="extra" data-delta="-1" aria-label="One mattress fewer">−</button>
+            <output id="rd-extra">0</output>
+            <button type="button" data-step="extra" data-delta="1" aria-label="One mattress more">+</button>
+          </div>
+          <p class="field-help" id="rd-fits"></p>
+        </div>
+
+        <div class="field">
+          <label for="rd-notes">Notes</label>
+          <textarea id="rd-notes" rows="2"></textarea>
+        </div>
+
+        <p class="device-note">Changes are saved on this device only.</p>
+      </div>
+
+      <footer class="rd-foot">
+        <button type="button" class="link-btn" id="rd-reset" hidden>Reset to original</button>
+        <span class="spacer"></span>
+        <button type="submit" value="cancel" class="btn">Cancel</button>
+        <button type="submit" value="save" class="btn btn-primary">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button type="button" id="toast-undo">Undo</button>
   </div>
 
   <script type="module" src="js/app.js"></script>
