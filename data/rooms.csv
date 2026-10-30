@@ -69,7 +69,7 @@ FAIZ,219,2,Main wing,MARADO ROOM / BATHROOM OUTSIDE,Gents;Bathroom outside,9,1,0
 FAIZ,220,2,Main wing,BATHROOM INSIDE,Bathroom inside,7,0,0,no,,,,
 FAIZ,221,2,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
 FAIZ,222,2,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
-FAIZ,223,2,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
+FAIZ,223,2,Main wing,PARTITION PARDA,Partition,0,1,0,no,yes,,,
 FAIZ,224,2,Main wing,ROOM + HALL/ 1 BATHROOM,Suite,6,1,0,no,,,,
 FAIZ,225,2,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
 FAIZ,226,2,Main wing,PARTITION PARDA,Partition,4,1,0,no,,,,
