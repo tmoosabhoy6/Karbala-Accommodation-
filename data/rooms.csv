@@ -1,7 +1,7 @@
 building,room,floor,wing,room_type,features,beds,extra_mattress,extra_2,kg,blocked,occupant,people,notes
 FAIZ,101,1,Main wing,,,0,0,0,yes,,m taher b sehorewala,,
 FAIZ,102,1,Main wing,,,0,2,1,yes,,Sh Murtaza b zakir,,
-FAIZ,103,1,Main wing,,,0,2,0,yes,,,,
+FAIZ,103,1,Main wing,,,0,2,0,yes,,Sh Murtaza b zakir,,
 FAIZ,104,1,Main wing,,,2,2,0,no,,,,
 FAIZ,105,1,Main wing,,,2,2,0,no,,,,
 FAIZ,106,1,Main wing,,,3,1,0,no,,,,
