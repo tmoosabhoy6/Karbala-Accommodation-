@@ -5,9 +5,18 @@ A simple dashboard of the guest-house rooms, with two tabs:
 - **Guest rooms**: filter by building, floor, number of beds, wing, features and how many people a room fits. It shows the total rooms, beds and capacity for whatever is selected, grouped by floor, by number of beds, or by feature.
 - **KG & staff**: the Khidmat Guzar and staff rooms and who is staying in each. You can search by room or by name.
 
-Tap any room to edit it: block it (guest rooms show a red ✕ and are left out of all guest totals), or change its beds, extra mattresses, features, notes, room number, building, floor, wing or description, or move it between the guest and KG tabs. On KG rooms you can also set who is staying and how many people. **These changes are saved only on the device where they were made**, marked "Edited" on the room, and can be undone or reset to the original. To make a change permanent for everyone, edit the files below.
+Tap any room to edit it: block it (guest rooms show a red ✕ and are left out of all guest totals), or change its beds, extra mattresses, features, notes, room number, building, floor, wing or description, or move it between the guest and KG tabs. On KG rooms you can also set who is staying and how many people.
 
-There is no sign-in and no database. The whole room list lives in two files in this repository:
+## How saving works
+
+Every change made in the app is saved straight into `data/rooms.csv` in this repository, as a commit such as `Room 133: extra mattresses 2 → 1`. Every phone and tab reads the same file and checks for changes every 30 seconds, so nothing is lost when you close a tab. The commit history on GitHub is the full record of who changed what, and when.
+
+- **Viewing** needs nothing. Changes made by others appear within about a minute.
+- **Editing** needs a GitHub key on that device, entered once. Tap **Set up saving** at the top of the app and follow the steps: create a *fine-grained* key for this repository only, with **Contents: Read and write**. The key stays in that browser only and is never part of the website.
+- **Another phone:** on a device that is already set up, tap **Saving on → Copy link for another device**, then open that link once on the other phone. Anyone with the link can change the room list, so only share it with staff.
+- **Two people saving at once:** the app re-applies your change on top of theirs, so both are kept.
+
+There is no sign-in screen and no database. The whole room list lives in two files in this repository:
 
 | File | What it holds |
 |---|---|
@@ -15,6 +24,8 @@ There is no sign-in and no database. The whole room list lives in two files in t
 | `data/rooms.csv` | One row per room, in the order the house uses. |
 
 ## Editing rooms or building names
+
+You can also edit the files directly, which is the only way to change building names:
 
 1. On GitHub, open `data/rooms.csv` (or `data/buildings.csv`) and click the pencil icon.
 2. Change what you need and click **Commit changes**.

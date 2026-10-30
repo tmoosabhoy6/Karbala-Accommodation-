@@ -12,9 +12,12 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div>
-        <h1>Karbala Rooms</h1>
-        <p class="sub" id="sub">Room capacity by building, floor and feature</p>
+      <div class="title-row">
+        <div>
+          <h1>Karbala Rooms</h1>
+          <p class="sub" id="sub">Room capacity by building, floor and feature</p>
+        </div>
+        <button type="button" class="saving-status" id="saving-status">Set up saving</button>
       </div>
       <div class="segmented views" role="tablist" aria-label="Which rooms">
         <button type="button" role="tab" id="view-guest" aria-selected="true">Guest rooms</button>
@@ -75,6 +78,14 @@
     </aside>
 
     <main id="main">
+      <div class="banner" id="old-edits" hidden>
+        <p id="old-edits-text"></p>
+        <div class="banner-actions">
+          <button type="button" class="btn btn-primary" id="old-edits-add">Add to shared list</button>
+          <button type="button" class="btn" id="old-edits-discard">Discard</button>
+        </div>
+      </div>
+
       <section class="summary" aria-live="polite" id="summary">
         <div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div><div class="stat skeleton"></div>
       </section>
@@ -200,14 +211,54 @@
           </div>
         </details>
 
-        <p class="device-note" id="rd-device-note">Changes are saved on this device only.</p>
+        <p class="form-error" id="rd-error" role="alert" hidden></p>
+        <p class="device-note" id="rd-device-note"></p>
       </div>
 
       <footer class="rd-foot">
-        <button type="button" class="link-btn" id="rd-reset" hidden>Reset to original</button>
         <span class="spacer"></span>
         <button type="submit" value="cancel" class="btn">Cancel</button>
-        <button type="submit" value="save" class="btn btn-primary">Save</button>
+        <button type="submit" value="save" class="btn btn-primary" id="rd-save">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="key-dialog" aria-labelledby="kd-title">
+    <form method="dialog">
+      <header class="rd-head">
+        <h2 id="kd-title">Saving on this device</h2>
+        <button type="submit" class="icon-btn" aria-label="Close">✕</button>
+      </header>
+      <div class="rd-body">
+        <div id="kd-setup">
+          <p>Room changes are saved into the room list file on GitHub, so every phone and tab sees them. Each device that makes changes needs a GitHub key once.</p>
+          <ol class="steps">
+            <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → new access key</a> (signed in as the repository owner).</li>
+            <li>Name it <strong>Karbala Rooms</strong> and choose an expiry date.</li>
+            <li>Under <strong>Repository access</strong>, pick <strong>Only select repositories</strong> → <strong id="kd-repo">Karbala-Accommodation-</strong>.</li>
+            <li>Under <strong>Permissions → Repository permissions</strong>, set <strong>Contents</strong> to <strong>Read and write</strong>.</li>
+            <li>Click <strong>Generate token</strong>, copy it and paste it here.</li>
+          </ol>
+          <div class="field">
+            <label for="kd-key">GitHub key</label>
+            <input id="kd-key" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…">
+          </div>
+        </div>
+        <div id="kd-done" hidden>
+          <p class="ok-line">✓ Saving is on for this device.</p>
+          <p>To set up another phone without making a new key, copy this device's link and open it there once.
+            <strong>Anyone with that link can change the room list</strong>, so only send it to people who should.</p>
+          <div class="kd-actions">
+            <button type="button" class="btn" id="kd-copy">Copy link for another device</button>
+            <button type="button" class="link-btn danger" id="kd-off">Turn off saving on this device</button>
+          </div>
+        </div>
+        <p class="form-error" id="kd-error" role="alert" hidden></p>
+      </div>
+      <footer class="rd-foot">
+        <span class="spacer"></span>
+        <button type="submit" class="btn">Close</button>
+        <button type="button" class="btn btn-primary" id="kd-connect">Connect</button>
       </footer>
     </form>
   </dialog>

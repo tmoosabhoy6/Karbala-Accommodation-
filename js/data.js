@@ -41,7 +41,8 @@ export function compareFeatures(a, b) {
 }
 
 // Minimal RFC 4180 CSV parser: quoted fields, escaped quotes, CRLF.
-export function parseCSV(text) {
+// Returns the header and one object per row, keyed by column name.
+export function parseCSVTable(text) {
   const rows = [];
   let row = [];
   let field = '';
@@ -64,9 +65,25 @@ export function parseCSV(text) {
   row.push(field);
   if (row.some((f) => f.trim() !== '')) rows.push(row);
 
-  const [header, ...body] = rows;
-  const keys = header.map((h) => h.trim());
-  return body.map((cells) => Object.fromEntries(keys.map((k, i) => [k, (cells[i] ?? '').trim()])));
+  const [first = [], ...body] = rows;
+  const header = first.map((h) => h.trim());
+  return {
+    header,
+    rows: body.map((cells) => Object.fromEntries(header.map((k, i) => [k, (cells[i] ?? '').trim()]))),
+  };
+}
+
+export function parseCSV(text) {
+  return parseCSVTable(text).rows;
+}
+
+// Writes rows back out in the same style as the files in data/: values are
+// quoted only when they contain a comma, quote or line break.
+export function toCSV(header, rows) {
+  const cell = (v = '') => (/[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  return [header, ...rows.map((r) => header.map((h) => r[h]))]
+    .map((cells) => cells.map(cell).join(','))
+    .join('\n') + '\n';
 }
 
 function yes(value) {
@@ -152,14 +169,43 @@ export const EDITABLE = [
   'kg', 'blocked', 'occupant', 'people', 'notes',
 ];
 
-// Replaces a room's fields with the values saved on this device.
-// "Fits up to" is always worked out again from beds + extra mattresses.
-export function withEdit(room, edit) {
-  if (!edit) return room;
-  const r = { ...room, edited: true, original: room };
-  for (const k of EDITABLE) if (edit[k] !== undefined) r[k] = edit[k];
-  r.maxPax = r.beds + r.extra;
-  return r;
+// Writes one room field into a rooms.csv row.
+function setColumn(row, field, value) {
+  switch (field) {
+    case 'roomType': row.room_type = value; break;
+    case 'features': row.features = value.join(';'); break;
+    case 'beds': row.beds = String(value); break;
+    case 'people': row.people = value ? String(value) : ''; break;
+    case 'kg': row.kg = value ? 'yes' : 'no'; break;
+    case 'blocked': row.blocked = value ? 'yes' : ''; break;
+    case 'extra': {
+      // The file splits mattresses over two columns; keep extra_2 where it still fits.
+      const extra2 = Math.min(Number(row.extra_2) || 0, value);
+      row.extra_2 = String(extra2);
+      row.extra_mattress = String(value - extra2);
+      break;
+    }
+    default: row[field] = value;
+  }
+}
+
+// Applies { [roomId]: { field: value } } to the text of rooms.csv and returns
+// the new text. Rooms that are no longer in the file are listed in `missing`.
+export function applyChanges(roomsCsv, changes) {
+  const { header, rows } = parseCSVTable(roomsCsv);
+  const missing = [];
+  for (const [id, fields] of Object.entries(changes)) {
+    const row = rows.find((r) => `${r.building}|${r.room}` === id);
+    if (!row) { missing.push(id); continue; }
+    for (const [field, value] of Object.entries(fields)) {
+      if (!EDITABLE.includes(field)) continue;
+      setColumn(row, field, value);
+    }
+  }
+  for (const col of ['kg', 'blocked', 'occupant', 'people']) {
+    if (!header.includes(col) && rows.some((r) => r[col])) header.push(col);
+  }
+  return { text: toCSV(header, rows), missing };
 }
 
 const squash = (s) => s.toLowerCase().replace(/\s+/g, '');

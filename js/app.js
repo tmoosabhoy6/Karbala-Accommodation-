@@ -1,6 +1,9 @@
 import {
-  buildModel, applyFilters, totals, withEdit, EDITABLE, floorLabel, floorShort, compareFloors, compareFeatures,
+  buildModel, applyFilters, applyChanges, totals, EDITABLE, floorLabel, floorShort, compareFloors, compareFeatures,
 } from './data.js';
+import {
+  REPO, getKey, setKey, readFile, writeFile, KeyError, ConflictError,
+} from './store.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => n.toLocaleString('en-US');
@@ -19,26 +22,22 @@ const state = {
   by: 'floor', // capacity breakdown: 'floor' | 'beds' | 'feature'
 };
 
-let model; // { buildings, rooms } straight from the CSV files
-let rooms; // rooms in active buildings, with this device's edits applied
+let model; // { buildings, rooms } built from the two CSV files
+let rooms; // rooms in active buildings
 let buildingName; // code -> name
+const files = { buildings: null, rooms: null }; // latest { text, sha } of each file
 
-// ---- Edits saved on this device -------------------------------------------------
+const BUILDINGS_PATH = 'data/buildings.csv';
+const ROOMS_PATH = 'data/rooms.csv';
 
-const EDITS_KEY = 'karbala-rooms:edits:v1';
-let edits = {};
-
-function loadEdits() {
-  try { edits = JSON.parse(localStorage.getItem(EDITS_KEY)) || {}; } catch { edits = {}; }
-}
-
-function storeEdits() {
-  try { localStorage.setItem(EDITS_KEY, JSON.stringify(edits)); return true; } catch { return false; }
-}
-
-function applyEdits() {
+function useFiles(buildingsFile, roomsFile) {
+  files.buildings = buildingsFile;
+  files.rooms = roomsFile;
+  model = buildModel(buildingsFile.text, roomsFile.text);
+  if (model.errors.length) console.warn('Room data problems:', model.errors);
+  buildingName = new Map(model.buildings.map((x) => [x.code, x.name]));
   const active = new Set(model.buildings.filter((b) => b.active).map((b) => b.code));
-  rooms = model.rooms.filter((r) => active.has(r.building)).map((r) => withEdit(r, edits[r.id]));
+  rooms = model.rooms.filter((r) => active.has(r.building));
 }
 
 // ---- URL state, so a filtered view can be bookmarked or shared -------------------
@@ -296,14 +295,13 @@ function groupByBuildingFloor(list) {
 
 // ---- Room tiles -----------------------------------------------------------------
 
-const EDITED = '<span class="edited" title="Changed on this device">Edited</span>';
 const BLOCKED_X = '<span class="blocked-x" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></span>';
 
 function guestTile(r) {
   const tags = [...r.features];
   if (r.wing === 'New wing') tags.unshift('New wing');
   return `
-    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}${r.blocked ? BLOCKED_X : ''}</div>
+    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.blocked ? BLOCKED_X : ''}</div>
     ${r.blocked ? '<div class="tile-blocked-label">Blocked</div>' : ''}
     <div class="tile-cap">${plural(r.beds, 'bed', 'beds')} · up to <strong>${r.maxPax}</strong></div>
     ${r.extra ? `<div class="tile-extra">+${plural(r.extra, 'extra mattress', 'extra mattresses')}</div>` : ''}
@@ -316,7 +314,7 @@ function kgTile(r) {
     ? `<div class="tile-who">${esc(r.occupant)}</div>`
     : '<div class="tile-who tile-empty">No one listed</div>';
   return `
-    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span>${r.edited ? EDITED : ''}</div>
+    <div class="tile-top"><span class="tile-room">${esc(r.room)}</span></div>
     ${who}
     ${r.people ? `<div class="tile-extra">${plural(r.people, 'person', 'people')}</div>` : ''}
     ${r.extra ? `<div class="tile-extra">+${plural(r.extra, 'extra mattress', 'extra mattresses')}</div>` : ''}
@@ -390,7 +388,8 @@ function openRoom(id) {
   const wings = [...new Set([...model.rooms.map((r) => r.wing), room.wing])].filter(Boolean).sort();
   $('rd-wing').innerHTML = options([['', 'None'], ...wings.map((w) => [w, w])], room.wing);
 
-  $('rd-reset').hidden = !room.edited;
+  $('rd-error').hidden = true;
+  renderSaveButton();
   document.querySelector('.rd-more').open = false;
   renderDraft();
   $('room-dialog').showModal();
@@ -419,31 +418,86 @@ function addFeature() {
   renderDraft();
 }
 
-// Saves the edit for one room and offers an undo that puts back what was there.
-function saveEdit(room, next, message) {
-  const before = edits[room.id];
-  if (next) edits[room.id] = next; else delete edits[room.id];
-  const ok = storeEdits();
-  applyEdits();
-  render();
-  showToast(ok ? message : 'Could not save on this device (storage is blocked)', ok ? () => {
-    if (before) edits[room.id] = before; else delete edits[room.id];
-    storeEdits();
-    applyEdits();
-    render();
-  } : null);
+// ---- Saving to the shared room list ---------------------------------------------
+
+const LABELS = {
+  room: 'room number', building: 'building', floor: 'floor', wing: 'wing', roomType: 'description',
+  features: 'features', beds: 'beds', extra: 'extra mattresses', kg: 'KG room', blocked: 'blocked',
+  occupant: 'staying', people: 'people', notes: 'notes',
+};
+
+function showValue(v) {
+  if (Array.isArray(v)) return v.length ? v.join(', ') : 'none';
+  if (typeof v === 'boolean') return v ? 'yes' : 'no';
+  if (v === '' || v == null) return '—';
+  const text = String(v);
+  return text.length > 40 ? `${text.slice(0, 37)}…` : text;
 }
 
-// action: 'save' | 'reset' | anything else (cancel)
-function finishEdit(action) {
+// Commit message, e.g. "Room 133: beds 4 → 3, extra mattresses 2 → 1"
+function describe(room, before, after) {
+  const parts = Object.keys(after).map((k) => (k === 'blocked' && after.blocked === true
+    ? 'blocked'
+    : `${LABELS[k]} ${showValue(before[k])} → ${showValue(after[k])}`));
+  return `${roomTitle(room)}: ${parts.join(', ')}`;
+}
+
+function friendlyError(problem) {
+  if (/listed twice/.test(problem)) return 'Another room in that building already has this number.';
+  return `The room list would not be valid: ${problem}`;
+}
+
+// Applies { [roomId]: { field: value } } to the latest rooms.csv and commits it.
+// If someone else saved in the meantime, the change is re-applied on top of theirs.
+async function commitChanges(changes, message) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const [buildingsFile, roomsFile] = await Promise.all([readFile(BUILDINGS_PATH), readFile(ROOMS_PATH)]);
+    const { text, missing } = applyChanges(roomsFile.text, changes);
+    if (missing.length) throw new Error('Someone else just changed this room. Close the panel and try again.');
+    const check = buildModel(buildingsFile.text, text);
+    if (check.errors.length) throw new Error(friendlyError(check.errors[0]));
+    if (text === roomsFile.text) { useFiles(buildingsFile, roomsFile); return; }
+    try {
+      const sha = await writeFile(ROOMS_PATH, text, roomsFile.sha, message);
+      useFiles(buildingsFile, { text, sha });
+      return;
+    } catch (err) {
+      if (!(err instanceof ConflictError)) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
+    }
+  }
+  throw new Error('Could not save because others are saving at the same time. Try again.');
+}
+
+// Saves a change to one room; the toast's Undo saves the previous values back.
+async function saveRoom(room, after, toastText) {
+  const before = Object.fromEntries(Object.keys(after).map((k) => [k, room[k]]));
+  await commitChanges({ [room.id]: after }, describe(room, before, after));
+  render();
+  const newId = `${after.building ?? room.building}|${after.room ?? room.room}`;
+  showToast(toastText, async () => {
+    try {
+      await commitChanges({ [newId]: before }, `Undo: ${describe({ room: after.room ?? room.room }, after, before)}`);
+      render();
+      showToast('Change undone');
+    } catch (err) {
+      showToast(err.message);
+    }
+  });
+}
+
+function renderSaveButton() {
+  const connected = Boolean(getKey());
+  $('rd-save').textContent = connected ? 'Save' : 'Set up saving';
+  $('rd-device-note').textContent = connected
+    ? 'Saved to the shared room list, so every phone sees it.'
+    : 'To change rooms, this device needs to be set up for saving once.';
+}
+
+async function finishEdit() {
   if (!editing) return;
   const { room, draft } = editing;
-  editing = null;
-  if (action === 'reset') {
-    saveEdit(room, null, `${roomTitle(room)} reset to original`);
-    return;
-  }
-  if (action !== 'save') return;
+  if (!getKey()) { openKeyDialog(); return; }
 
   draft.occupant = $('rd-occupant').value.trim();
   draft.notes = $('rd-notes').value.trim();
@@ -456,22 +510,153 @@ function finishEdit(action) {
   draft.blocked = draft.kg ? false : $('rd-blocked').checked;
   draft.features.sort(compareFeatures);
 
-  // Keep only the fields that differ from the room list.
   const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
-  const base = room.original || room;
-  const next = {};
-  for (const k of EDITABLE) if (!same(draft[k], base[k])) next[k] = draft[k];
   const changed = EDITABLE.filter((k) => !same(draft[k], room[k]));
-  if (changed.length === 0) return;
+  if (changed.length === 0) { closeRoom(); return; }
+  const after = Object.fromEntries(changed.map((k) => [k, draft[k]]));
 
-  let message = `Saved ${roomTitle({ room: draft.room })}`;
+  let toastText = `Saved ${roomTitle({ room: draft.room })}`;
   if (changed.length === 1 && changed[0] === 'blocked') {
-    message = `${draft.blocked ? 'Blocked' : 'Unblocked'} ${roomTitle(room)}`;
+    toastText = `${draft.blocked ? 'Blocked' : 'Unblocked'} ${roomTitle(room)}`;
   } else if (changed.includes('kg')) {
-    message = `Moved ${roomTitle({ room: draft.room })} to ${draft.kg ? 'KG & staff' : 'Guest rooms'}`;
+    toastText = `Moved ${roomTitle({ room: draft.room })} to ${draft.kg ? 'KG & staff' : 'Guest rooms'}`;
   }
-  if (Object.keys(next).length) next.at = new Date().toISOString();
-  saveEdit(room, Object.keys(next).length ? next : null, message);
+
+  const button = $('rd-save');
+  button.disabled = true;
+  button.textContent = 'Saving…';
+  $('rd-error').hidden = true;
+  try {
+    await saveRoom(room, after, toastText);
+    closeRoom();
+  } catch (err) {
+    $('rd-error').textContent = err.message;
+    $('rd-error').hidden = false;
+    if (err instanceof KeyError) renderSaveButton();
+  } finally {
+    button.disabled = false;
+    if (editing) renderSaveButton();
+  }
+}
+
+function closeRoom() {
+  editing = null;
+  if ($('room-dialog').open) $('room-dialog').close();
+}
+
+// ---- Setting up saving on this device ---------------------------------------------
+
+function openKeyDialog() {
+  renderKeyDialog();
+  $('key-dialog').showModal();
+}
+
+function renderKeyDialog() {
+  const key = getKey();
+  $('kd-setup').hidden = Boolean(key);
+  $('kd-done').hidden = !key;
+  $('kd-error').hidden = true;
+  $('kd-key').value = '';
+  $('kd-repo').textContent = REPO.repo;
+  $('kd-connect').hidden = Boolean(key);
+}
+
+async function connectKey() {
+  const key = $('kd-key').value.trim();
+  if (!key) return;
+  const button = $('kd-connect');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  try {
+    await readFile(ROOMS_PATH, key);
+    if (!setKey(key)) throw new Error('This browser is blocking storage, so the key cannot be kept.');
+    await refresh();
+    renderKeyDialog();
+    renderSaveButton();
+    renderSavingStatus();
+    showToast('Saving is set up on this device');
+  } catch (err) {
+    let message = 'Could not check the key. Check the internet and try again.';
+    if (err.message.startsWith('This browser')) message = err.message;
+    else if (err instanceof KeyError) {
+      message = /not valid/.test(err.message)
+        ? 'GitHub did not accept this key. Check that you copied all of it.'
+        : err.message;
+    }
+    $('kd-error').textContent = message;
+    $('kd-error').hidden = false;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Connect';
+  }
+}
+
+function renderSavingStatus() {
+  const on = Boolean(getKey());
+  $('saving-status').textContent = on ? 'Saving on' : 'Set up saving';
+  $('saving-status').classList.toggle('on', on);
+}
+
+// A link with "#key=..." sets up saving on the device that opens it.
+function takeKeyFromLink() {
+  const match = location.hash.match(/key=([^&]+)/);
+  if (!match) return false;
+  history.replaceState(null, '', location.pathname + location.search);
+  return setKey(decodeURIComponent(match[1]));
+}
+
+// ---- Keeping up to date -----------------------------------------------------------
+
+async function refresh() {
+  try {
+    const [b, r] = await Promise.all([readFile(BUILDINGS_PATH), readFile(ROOMS_PATH)]);
+    if (b.text === files.buildings?.text && r.text === files.rooms?.text) {
+      files.rooms.sha = r.sha;
+      return;
+    }
+    useFiles(b, r);
+    render();
+  } catch (err) {
+    if (err instanceof KeyError) {
+      console.warn(err.message);
+    }
+  }
+}
+
+function keepUpToDate() {
+  setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+}
+
+// Changes made before saving was shared were kept only in this browser.
+const OLD_EDITS_KEY = 'karbala-rooms:edits:v1';
+
+function oldEdits() {
+  try { return JSON.parse(localStorage.getItem(OLD_EDITS_KEY)) || {}; } catch { return {}; }
+}
+
+function renderOldEditsBanner() {
+  const count = Object.keys(oldEdits()).length;
+  $('old-edits').hidden = count === 0;
+  $('old-edits-text').textContent = `${plural(count, 'room change', 'room changes')} from before were saved only on this device.`;
+}
+
+async function uploadOldEdits() {
+  if (!getKey()) { openKeyDialog(); return; }
+  const changes = {};
+  for (const [id, edit] of Object.entries(oldEdits())) {
+    const { at, ...fields } = edit;
+    if (rooms.some((r) => r.id === id)) changes[id] = fields;
+  }
+  try {
+    await commitChanges(changes, `Add ${plural(Object.keys(changes).length, 'room change', 'room changes')} saved earlier on one device`);
+    try { localStorage.removeItem(OLD_EDITS_KEY); } catch { /* ignore */ }
+    render();
+    renderOldEditsBanner();
+    showToast('Added to the shared room list');
+  } catch (err) {
+    showToast(err.message);
+  }
 }
 
 // ---- Toast with undo ------------------------------------------------------------
@@ -479,7 +664,7 @@ function finishEdit(action) {
 let toastTimer;
 let toastUndo;
 
-function showToast(text, undo) {
+function showToast(text, undo = null) {
   $('toast-text').textContent = text;
   $('toast-undo').hidden = !undo;
   toastUndo = undo;
@@ -600,16 +785,38 @@ function wire() {
     editing.draft[k] = Math.max(0, editing.draft[k] + Number(b.dataset.delta));
     renderDraft();
   });
-  // The form uses method="dialog", so submitting closes the panel; the edit is
-  // applied right away rather than waiting for the dialog's close event.
-  $('room-form').addEventListener('submit', (e) => finishEdit(e.submitter?.value));
+  $('room-form').addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'save') { editing = null; return; }
+    e.preventDefault();
+    finishEdit();
+  });
   $('rd-add-feature').addEventListener('click', addFeature);
   $('rd-new-feature').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); addFeature(); }
   });
   $('rd-kg').addEventListener('change', (e) => { if (editing) { editing.draft.kg = e.target.checked; renderDraft(); } });
-  $('rd-reset').addEventListener('click', () => { finishEdit('reset'); $('room-dialog').close(); });
-  $('room-dialog').addEventListener('close', () => finishEdit('cancel'));
+  $('room-dialog').addEventListener('close', () => { editing = null; });
+
+  $('saving-status').addEventListener('click', openKeyDialog);
+  $('kd-connect').addEventListener('click', connectKey);
+  $('kd-key').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); connectKey(); } });
+  $('kd-copy').addEventListener('click', async () => {
+    const link = `${location.origin}${location.pathname}#key=${encodeURIComponent(getKey())}`;
+    try { await navigator.clipboard.writeText(link); showToast('Link copied'); } catch { prompt('Copy this link:', link); }
+  });
+  $('kd-off').addEventListener('click', () => {
+    setKey('');
+    renderKeyDialog();
+    renderSavingStatus();
+    if (editing) renderSaveButton();
+    refresh();
+  });
+  $('key-dialog').addEventListener('close', () => { if (editing) renderSaveButton(); });
+  $('old-edits-add').addEventListener('click', uploadOldEdits);
+  $('old-edits-discard').addEventListener('click', () => {
+    try { localStorage.removeItem(OLD_EDITS_KEY); } catch { /* ignore */ }
+    renderOldEditsBanner();
+  });
 
   $('toast-undo').addEventListener('click', () => {
     $('toast').hidden = true;
@@ -625,15 +832,17 @@ function wire() {
 }
 
 async function load() {
-  const get = async (path) => {
-    const res = await fetch(path, { cache: 'no-cache' });
-    if (!res.ok) throw new Error(`${path}: ${res.status}`);
-    return res.text();
-  };
+  const fromLink = takeKeyFromLink();
   try {
-    const [b, r] = await Promise.all([get('data/buildings.csv'), get('data/rooms.csv')]);
-    model = buildModel(b, r);
-    if (model.errors.length) console.warn('Room data problems:', model.errors);
+    let b; let r;
+    try {
+      [b, r] = await Promise.all([readFile(BUILDINGS_PATH), readFile(ROOMS_PATH)]);
+    } catch (err) {
+      // A key that stopped working should not stop people seeing the rooms.
+      if (!(err instanceof KeyError)) throw err;
+      [b, r] = await Promise.all([readFile(BUILDINGS_PATH, ''), readFile(ROOMS_PATH, '')]);
+    }
+    useFiles(b, r);
   } catch (err) {
     console.error(err);
     $('main').innerHTML = `
@@ -644,9 +853,6 @@ async function load() {
       </div>`;
     return;
   }
-  buildingName = new Map(model.buildings.map((x) => [x.code, x.name]));
-  loadEdits();
-  applyEdits();
 
   readUrl();
   // Open "More filters" on load if any of them are in use.
@@ -656,6 +862,10 @@ async function load() {
   }
   wire();
   render();
+  renderSavingStatus();
+  renderOldEditsBanner();
+  keepUpToDate();
+  if (fromLink) showToast('Saving is set up on this device');
 }
 
 load();
