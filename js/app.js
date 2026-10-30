@@ -1,5 +1,5 @@
 import {
-  buildModel, applyFilters, totals, withEdit, floorLabel, floorShort, compareFloors, compareFeatures,
+  buildModel, applyFilters, totals, withEdit, EDITABLE, floorLabel, floorShort, compareFloors, compareFeatures,
 } from './data.js';
 
 const $ = (id) => document.getElementById(id);
@@ -360,42 +360,63 @@ let editing = null; // { room, draft }
 
 const roomTitle = (r) => (/\d/.test(r.room) ? `Room ${r.room}` : r.room);
 
+function options(list, selected) {
+  return list.map(([value, label]) =>
+    `<option value="${esc(value)}"${value === selected ? ' selected' : ''}>${esc(label)}</option>`).join('');
+}
+
 function openRoom(id) {
   const room = rooms.find((r) => r.id === id);
   if (!room) return;
-  editing = {
-    room,
-    draft: { extra: room.extra, occupant: room.occupant, people: room.people, notes: room.notes, blocked: room.blocked },
-  };
-  const base = room.original || room;
+  const draft = {};
+  for (const k of EDITABLE) draft[k] = k === 'features' ? [...room.features] : room[k];
+  editing = { room, draft };
+
   $('rd-where').textContent = `${buildingName.get(room.building)} · ${floorLabel(room.floor)}${room.wing ? ` · ${room.wing}` : ''}`;
   $('rd-title').textContent = roomTitle(room);
 
-  const facts = [];
-  if (!room.kg || room.beds) facts.push(['Beds', fmt(room.beds)]);
-  if (room.features.length) facts.push(['Features', room.features.join(', ')]);
-  if (room.roomType) facts.push(['Listed as', room.roomType]);
-  if (room.edited) facts.push(['Original', `${plural(base.extra, 'extra mattress', 'extra mattresses')}${base.occupant ? ` · ${base.occupant}` : ''}${base.blocked ? ' · blocked' : ''}`]);
-  $('rd-facts').innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
-
-  for (const el of document.querySelectorAll('.kg-field')) el.hidden = !room.kg;
-  $('rd-block-field').hidden = room.kg;
-  $('rd-blocked').checked = room.blocked;
   $('rd-occupant').value = room.occupant;
   $('rd-notes').value = room.notes;
+  $('rd-room').value = room.room;
+  $('rd-type').value = room.roomType;
+  $('rd-blocked').checked = room.blocked;
+  $('rd-kg').checked = room.kg;
+  $('rd-new-feature').value = '';
+
+  $('rd-building').innerHTML = options(
+    model.buildings.filter((b) => b.active || b.code === room.building).map((b) => [b.code, b.name]), room.building);
+  const floors = [...new Set([...model.rooms.map((r) => r.floor), room.floor])].sort(compareFloors);
+  $('rd-floor').innerHTML = options(floors.map((f) => [f, floorLabel(f)]), room.floor);
+  const wings = [...new Set([...model.rooms.map((r) => r.wing), room.wing])].filter(Boolean).sort();
+  $('rd-wing').innerHTML = options([['', 'None'], ...wings.map((w) => [w, w])], room.wing);
+
   $('rd-reset').hidden = !room.edited;
+  document.querySelector('.rd-more').open = false;
   renderDraft();
   $('room-dialog').showModal();
 }
 
 function renderDraft() {
-  const { room, draft } = editing;
+  const { draft } = editing;
+  for (const el of document.querySelectorAll('.kg-field')) el.hidden = !draft.kg;
+  $('rd-block-field').hidden = draft.kg;
+  $('rd-beds').textContent = draft.beds;
   $('rd-extra').textContent = draft.extra;
   $('rd-people').textContent = draft.people ? plural(draft.people, 'person', 'people') : 'Not set';
-  $('rd-fits').textContent = `${plural(room.beds, 'bed', 'beds')} + ${plural(draft.extra, 'mattress', 'mattresses')} = fits up to ${room.beds + draft.extra}`;
+  $('rd-fits').innerHTML = `${plural(draft.beds, 'bed', 'beds')} + ${plural(draft.extra, 'mattress', 'mattresses')} = fits up to <strong>${draft.beds + draft.extra}</strong>`;
   for (const b of document.querySelectorAll('[data-step]')) {
     if (Number(b.dataset.delta) < 0) b.disabled = draft[b.dataset.step] <= 0;
   }
+  const known = [...new Set([...model.rooms.flatMap((r) => r.features), ...draft.features])].sort(compareFeatures);
+  $('rd-features').innerHTML = known.map((f) =>
+    `<button type="button" class="chip" aria-pressed="${draft.features.includes(f)}" data-feature="${esc(f)}">${esc(f)}</button>`).join('');
+}
+
+function addFeature() {
+  const f = $('rd-new-feature').value.trim();
+  if (f && !editing.draft.features.includes(f)) editing.draft.features.push(f);
+  $('rd-new-feature').value = '';
+  renderDraft();
 }
 
 // Saves the edit for one room and offers an undo that puts back what was there.
@@ -425,23 +446,32 @@ function finishEdit(action) {
   if (action !== 'save') return;
 
   draft.occupant = $('rd-occupant').value.trim();
-  draft.blocked = room.kg ? room.blocked : $('rd-blocked').checked;
   draft.notes = $('rd-notes').value.trim();
-  // Only keep the fields that differ from the room list.
+  draft.room = $('rd-room').value.trim() || room.room;
+  draft.roomType = $('rd-type').value.trim();
+  draft.building = $('rd-building').value;
+  draft.floor = $('rd-floor').value;
+  draft.wing = $('rd-wing').value;
+  draft.kg = $('rd-kg').checked;
+  draft.blocked = draft.kg ? false : $('rd-blocked').checked;
+  draft.features.sort(compareFeatures);
+
+  // Keep only the fields that differ from the room list.
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const base = room.original || room;
   const next = {};
-  const FIELDS = ['extra', 'occupant', 'people', 'notes', 'blocked'];
-  for (const k of FIELDS) {
-    if (draft[k] !== base[k]) next[k] = draft[k];
-  }
-  const changed = FIELDS.filter((k) => draft[k] !== room[k]);
+  for (const k of EDITABLE) if (!same(draft[k], base[k])) next[k] = draft[k];
+  const changed = EDITABLE.filter((k) => !same(draft[k], room[k]));
   if (changed.length === 0) return;
-  next.at = new Date().toISOString();
-  let message = `Saved ${roomTitle(room)}`;
+
+  let message = `Saved ${roomTitle({ room: draft.room })}`;
   if (changed.length === 1 && changed[0] === 'blocked') {
     message = `${draft.blocked ? 'Blocked' : 'Unblocked'} ${roomTitle(room)}`;
+  } else if (changed.includes('kg')) {
+    message = `Moved ${roomTitle({ room: draft.room })} to ${draft.kg ? 'KG & staff' : 'Guest rooms'}`;
   }
-  saveEdit(room, Object.keys(next).length > 1 ? next : null, message);
+  if (Object.keys(next).length) next.at = new Date().toISOString();
+  saveEdit(room, Object.keys(next).length ? next : null, message);
 }
 
 // ---- Toast with undo ------------------------------------------------------------
@@ -555,8 +585,17 @@ function wire() {
   });
 
   $('room-form').addEventListener('click', (e) => {
+    if (!editing) return;
+    const chipEl = e.target.closest('#rd-features .chip');
+    if (chipEl) {
+      const f = chipEl.dataset.feature;
+      const list = editing.draft.features;
+      editing.draft.features = list.includes(f) ? list.filter((x) => x !== f) : [...list, f];
+      renderDraft();
+      return;
+    }
     const b = e.target.closest('[data-step]');
-    if (!b || !editing) return;
+    if (!b) return;
     const k = b.dataset.step;
     editing.draft[k] = Math.max(0, editing.draft[k] + Number(b.dataset.delta));
     renderDraft();
@@ -564,6 +603,11 @@ function wire() {
   // The form uses method="dialog", so submitting closes the panel; the edit is
   // applied right away rather than waiting for the dialog's close event.
   $('room-form').addEventListener('submit', (e) => finishEdit(e.submitter?.value));
+  $('rd-add-feature').addEventListener('click', addFeature);
+  $('rd-new-feature').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addFeature(); }
+  });
+  $('rd-kg').addEventListener('change', (e) => { if (editing) { editing.draft.kg = e.target.checked; renderDraft(); } });
   $('rd-reset').addEventListener('click', () => { finishEdit('reset'); $('room-dialog').close(); });
   $('room-dialog').addEventListener('close', () => finishEdit('cancel'));
 

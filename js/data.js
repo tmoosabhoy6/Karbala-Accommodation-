@@ -146,16 +146,19 @@ export function totals(rooms) {
   return { rooms: count, beds, extra, maxPax };
 }
 
-// Replaces a room's editable fields with the values saved on this device.
-// edit: { extra?, occupant?, people?, notes?, blocked? }
+// Fields of a room that can be changed from the room panel.
+export const EDITABLE = [
+  'room', 'building', 'floor', 'wing', 'roomType', 'features', 'beds', 'extra',
+  'kg', 'blocked', 'occupant', 'people', 'notes',
+];
+
+// Replaces a room's fields with the values saved on this device.
+// "Fits up to" is always worked out again from beds + extra mattresses.
 export function withEdit(room, edit) {
   if (!edit) return room;
   const r = { ...room, edited: true, original: room };
-  if (edit.extra != null) { r.extra = edit.extra; r.maxPax = r.beds + edit.extra; }
-  if (edit.occupant != null) r.occupant = edit.occupant;
-  if (edit.people != null) r.people = edit.people;
-  if (edit.notes != null) r.notes = edit.notes;
-  if (edit.blocked != null) r.blocked = edit.blocked;
+  for (const k of EDITABLE) if (edit[k] !== undefined) r[k] = edit[k];
+  r.maxPax = r.beds + r.extra;
   return r;
 }
 

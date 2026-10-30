@@ -5,7 +5,7 @@ A simple dashboard of the guest-house rooms, with two tabs:
 - **Guest rooms**: filter by building, floor, number of beds, wing, features and how many people a room fits. It shows the total rooms, beds and capacity for whatever is selected, grouped by floor, by number of beds, or by feature.
 - **KG & staff**: the Khidmat Guzar and staff rooms and who is staying in each. You can search by room or by name.
 
-Tap a guest room to **block** it (it shows a red ✕ and is left out of all guest totals and counts) or to change its extra mattresses or notes; on KG rooms you can also change the name and the number of people. **These changes are saved only on the device where they were made**, marked "Edited" on the room, and can be undone or reset to the original. To make a change permanent for everyone, edit the files below.
+Tap any room to edit it: block it (guest rooms show a red ✕ and are left out of all guest totals), or change its beds, extra mattresses, features, notes, room number, building, floor, wing or description, or move it between the guest and KG tabs. On KG rooms you can also set who is staying and how many people. **These changes are saved only on the device where they were made**, marked "Edited" on the room, and can be undone or reset to the original. To make a change permanent for everyone, edit the files below.
 
 There is no sign-in and no database. The whole room list lives in two files in this repository:
 
