@@ -22,6 +22,7 @@
       <div class="segmented views" role="tablist" aria-label="Which rooms">
         <button type="button" role="tab" id="view-guest" aria-selected="true">Guest rooms</button>
         <button type="button" role="tab" id="view-kg" aria-selected="false">KG &amp; staff</button>
+        <button type="button" role="tab" id="view-live" aria-selected="false"><span class="live-tab-dot" aria-hidden="true"></span>Live</button>
       </div>
     </div>
   </header>
@@ -78,6 +79,50 @@
     </aside>
 
     <main id="main">
+      <section class="live" id="live" aria-label="Live accommodation">
+        <div class="live-bar">
+          <p class="live-state" id="live-state" role="status">Loading…</p>
+          <div class="live-links">
+            <a class="link-btn" id="live-sheet-link" href="#" target="_blank" rel="noopener" hidden>Open the sheet</a>
+            <button type="button" class="link-btn" id="live-change" hidden>Connection</button>
+          </div>
+        </div>
+
+        <div class="panel live-setup" id="live-setup" hidden>
+          <h2 class="panel-title">Connect the accommodation sheet</h2>
+          <p>The Live tab shows the <strong>ACCOMMODATION</strong> tab of the Google sheet and updates by itself whenever the sheet changes. It needs a small connector that one person sets up once, signed in to a Google account that can open the sheet. After that, every device just works and no one has to sign in.</p>
+          <ol class="steps">
+            <li>Open <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com → New project</a>.</li>
+            <li>Delete what is in the editor and paste in the code from <a href="https://github.com/tmoosabhoy6/Karbala-Accommodation-/blob/main/apps-script/Code.gs" target="_blank" rel="noopener">apps-script/Code.gs</a>. Click <strong>Save</strong>.</li>
+            <li>Click <strong>Deploy → New deployment</strong>, choose type <strong>Web app</strong>, set <strong>Execute as: Me</strong> and <strong>Who has access: Anyone</strong>, then <strong>Deploy</strong> and allow access.</li>
+            <li>Copy the <strong>Web app URL</strong> and paste it here.</li>
+          </ol>
+          <p class="field-help">Full step-by-step guide: <a href="https://github.com/tmoosabhoy6/Karbala-Accommodation-/blob/main/apps-script/README.md" target="_blank" rel="noopener">apps-script/README.md</a>.</p>
+          <div class="field">
+            <label for="live-url">Web app URL</label>
+            <input id="live-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/…/exec">
+          </div>
+          <p class="form-error" id="live-setup-error" role="alert" hidden></p>
+          <div class="kd-actions">
+            <button type="button" class="btn btn-primary" id="live-connect">Connect</button>
+            <button type="button" class="btn" id="live-cancel" hidden>Cancel</button>
+          </div>
+        </div>
+
+        <div class="live-body" id="live-body">
+          <div class="live-date" id="live-date" hidden>
+            <button type="button" class="icon-btn" id="live-prev" aria-label="Day before">‹</button>
+            <div class="live-day">
+              <span class="live-day-name" id="live-day-name"></span>
+              <span class="live-day-date" id="live-day-date"></span>
+            </div>
+            <button type="button" class="icon-btn" id="live-next" aria-label="Day after">›</button>
+            <button type="button" class="btn" id="live-today" hidden>Today</button>
+          </div>
+          <div class="live-content" id="live-content"><div class="skeleton block tall"></div></div>
+        </div>
+      </section>
+
       <div class="banner" id="old-edits" hidden>
         <p id="old-edits-text"></p>
         <div class="banner-actions">
@@ -259,6 +304,23 @@
         <span class="spacer"></span>
         <button type="submit" class="btn">Close</button>
         <button type="button" class="btn btn-primary" id="kd-connect">Connect</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <dialog id="live-dialog" aria-labelledby="ld-title">
+    <form method="dialog">
+      <header class="rd-head">
+        <div>
+          <p class="rd-where" id="ld-where"></p>
+          <h2 id="ld-title"></h2>
+        </div>
+        <button type="submit" class="icon-btn" aria-label="Close">✕</button>
+      </header>
+      <div class="rd-body" id="ld-body"></div>
+      <footer class="rd-foot">
+        <span class="spacer"></span>
+        <button type="submit" class="btn">Close</button>
       </footer>
     </form>
   </dialog>

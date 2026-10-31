@@ -1,11 +1,16 @@
 # Karbala Rooms
 
-A simple dashboard of the guest-house rooms, with two tabs:
+A simple dashboard of the guest-house rooms, with three tabs:
 
 - **Guest rooms**: filter by building, floor, number of beds, wing, features and how many people a room fits. It shows the total rooms, beds and capacity for whatever is selected, grouped by floor, by number of beds, or by feature.
 - **KG & staff**: the Khidmat Guzar and staff rooms and who is staying in each. You can search by room or by name.
+- **Live**: a live, read-only view of the **ACCOMMODATION** tab of the accommodation Google sheet. For any day it shows who is in each room and until when, which rooms are free (and who is due next), and who is arriving and leaving, grouped by party. It checks the sheet every 15 seconds, so check-ins, check-outs and room changes made in the sheet show up by themselves. Tap a room to see all its dates. Changes are still made in the sheet itself.
 
 Tap any room to edit it: block it (guest rooms show a red ✕ and are left out of all guest totals), or change its beds, extra mattresses, features, notes, room number, building, floor, wing or description, or move it between the guest and KG tabs. On KG rooms you can also set who is staying and how many people.
+
+## Live tab: connecting the sheet (one time)
+
+The sheet is a private .xlsx file in Google Drive, so it is read by a small Google Apps Script web app that runs under the Google account that sets it up. Nobody else has to sign in. Setup takes about five minutes and is described in [`apps-script/README.md`](apps-script/README.md). In short: paste [`apps-script/Code.gs`](apps-script/Code.gs) into a new project at script.google.com, deploy it as a web app (**Execute as: Me**, **Who has access: Anyone**), and paste the web app URL into the **Live** tab. The URL is kept in `data/live.json`, so every device picks it up.
 
 ## How saving works
 

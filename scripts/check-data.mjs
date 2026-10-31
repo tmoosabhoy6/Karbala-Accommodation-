@@ -8,6 +8,17 @@ import { buildModel, totals } from '../js/data.js';
 const read = (name) => readFileSync(new URL(`../data/${name}`, import.meta.url), 'utf8');
 const { buildings, rooms, errors } = buildModel(read('buildings.csv'), read('rooms.csv'));
 
+// data/live.json holds the address of the live sheet connector (see apps-script/README.md).
+try {
+  const live = JSON.parse(read('live.json'));
+  if (typeof live.url !== 'string') errors.push('live.json: "url" must be text (it can be empty)');
+  else if (live.url && !/^https:\/\/script\.google(usercontent)?\.com\//.test(live.url)) {
+    errors.push('live.json: "url" must be a Google Apps Script web app address');
+  }
+} catch (err) {
+  errors.push(`live.json: ${err.code === 'ENOENT' ? 'file is missing' : `not valid JSON (${err.message})`}`);
+}
+
 const line = (label, rs) => {
   const t = totals(rs);
   const kg = rs.filter((r) => r.kg).length;

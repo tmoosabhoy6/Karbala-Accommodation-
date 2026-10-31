@@ -4,6 +4,7 @@ import {
 import {
   REPO, getKey, setKey, readFile, writeFile, KeyError, ConflictError,
 } from './store.js';
+import { createLive } from './live.js';
 
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => n.toLocaleString('en-US');
@@ -11,7 +12,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const plural = (n, one, many) => `${fmt(n)} ${n === 1 ? one : many}`;
 
 const state = {
-  view: 'guest', // 'guest' | 'kg'
+  view: 'guest', // 'guest' | 'kg' | 'live'
   buildings: new Set(),
   floors: new Set(),
   beds: new Set(),
@@ -30,6 +31,18 @@ const files = { buildings: null, rooms: null }; // latest { text, sha } of each 
 const BUILDINGS_PATH = 'data/buildings.csv';
 const ROOMS_PATH = 'data/rooms.csv';
 
+// ---- Live view of the accommodation sheet ----------------------------------------
+
+const live = createLive({
+  getModel: () => model,
+  buildingName: (code) => buildingName.get(code),
+  readFile,
+  writeFile,
+  getKey,
+  showToast: (text) => showToast(text),
+  onChange: () => writeUrl(),
+});
+
 function useFiles(buildingsFile, roomsFile) {
   files.buildings = buildingsFile;
   files.rooms = roomsFile;
@@ -38,6 +51,7 @@ function useFiles(buildingsFile, roomsFile) {
   buildingName = new Map(model.buildings.map((x) => [x.code, x.name]));
   const active = new Set(model.buildings.filter((b) => b.active).map((b) => b.code));
   rooms = model.rooms.filter((r) => active.has(r.building));
+  live.roomsChanged();
 }
 
 // ---- URL state, so a filtered view can be bookmarked or shared -------------------
@@ -47,7 +61,8 @@ const SET_KEYS = { b: 'buildings', f: 'floors', bd: 'beds', w: 'wings', x: 'feat
 function readUrl() {
   const p = new URLSearchParams(location.search);
   for (const [k, field] of Object.entries(SET_KEYS)) state[field] = new Set(p.getAll(k));
-  state.view = p.get('v') === 'kg' ? 'kg' : 'guest';
+  state.view = ['kg', 'live'].includes(p.get('v')) ? p.get('v') : 'guest';
+  if (live) live.date = /^\d{4}-\d{2}-\d{2}$/.test(p.get('d') || '') ? p.get('d') : null;
   state.minPax = Math.max(0, parseInt(p.get('n'), 10) || 0);
   state.query = p.get('q') || '';
   state.by = ['beds', 'feature'].includes(p.get('by')) ? p.get('by') : 'floor';
@@ -55,7 +70,13 @@ function readUrl() {
 
 function writeUrl() {
   const p = new URLSearchParams();
-  if (state.view === 'kg') p.set('v', 'kg');
+  if (state.view !== 'guest') p.set('v', state.view);
+  if (state.view === 'live') {
+    if (live.date) p.set('d', live.date);
+    const qs = p.toString();
+    history.replaceState(null, '', `?${qs}`);
+    return;
+  }
   for (const [k, field] of Object.entries(SET_KEYS)) for (const v of state[field]) p.append(k, v);
   if (state.minPax) p.set('n', state.minPax);
   if (state.query) p.set('q', state.query);
@@ -677,8 +698,16 @@ function showToast(text, undo = null) {
 
 function render() {
   document.body.dataset.view = state.view;
-  $('view-guest').setAttribute('aria-selected', !isKg());
-  $('view-kg').setAttribute('aria-selected', isKg());
+  $('view-guest').setAttribute('aria-selected', state.view === 'guest');
+  $('view-kg').setAttribute('aria-selected', state.view === 'kg');
+  $('view-live').setAttribute('aria-selected', state.view === 'live');
+  if (state.view === 'live') {
+    $('sub').textContent = 'Who is in each room, straight from the accommodation sheet';
+    live.show();
+    writeUrl();
+    return;
+  }
+  live.hide();
   $('sub').textContent = isKg()
     ? 'Who is staying in the KG and staff rooms'
     : 'Guest room capacity by building, floor, beds and feature';
@@ -727,6 +756,7 @@ function setView(view) {
 function wire() {
   $('view-guest').addEventListener('click', () => setView('guest'));
   $('view-kg').addEventListener('click', () => setView('kg'));
+  $('view-live').addEventListener('click', () => setView('live'));
 
   document.querySelector('.filters').addEventListener('click', (e) => {
     const c = e.target.closest('.chip');
