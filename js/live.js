@@ -10,6 +10,12 @@ import { floorLabel } from './data.js';
 
 const CONFIG_PATH = 'data/live.json';
 const LOCAL_URL_KEY = 'karbala-rooms:live-url';
+// The connector everyone uses. data/live.json can point somewhere else; this is
+// used if that file is missing or empty, so the Live tab always connects.
+const BUILT_IN = {
+  url: 'https://script.google.com/macros/s/AKfycbw2R1NVruZ1UlrJxO-CKNWd9eINxghvGtglWOYmhQ4lUPrtTmWcrqKfoysRY20B5ThhSQ/exec',
+  sheet: 'https://docs.google.com/spreadsheets/d/1GUYbFC11AJfiJsqL8KOWw8RWjdho0BPC/edit',
+};
 const POLL_MS = 15000;
 const TIME_ZONE = 'Asia/Baghdad';
 
@@ -61,10 +67,12 @@ export function createLive({ getModel, buildingName, readFile, writeFile, getKey
   // ---- Connection -------------------------------------------------------------
 
   async function loadConfig() {
-    let config = { url: '', sheet: '' };
+    let config = { ...BUILT_IN };
     try {
       const file = await readFile(CONFIG_PATH);
-      config = { ...config, ...JSON.parse(file.text) };
+      const saved = JSON.parse(file.text);
+      if (saved.url) config.url = saved.url;
+      if (saved.sheet) config.sheet = saved.sheet;
       view.configSha = file.sha;
     } catch { /* no file yet */ }
     try {
